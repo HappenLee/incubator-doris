@@ -25,10 +25,10 @@
 #include "codegen/doris_ir.h"
 #include "common/logging.h"
 #include "common/compiler_util.h"
-#include "runtime/buffered_tuple_stream3.h"
-#include "runtime/buffered_tuple_stream3.inline.h"
 #include "runtime/bufferpool/buffer_pool.h"
 #include "runtime/bufferpool/suballocator.h"
+#include "runtime/buffered_tuple_stream2.h"
+#include "runtime/buffered_tuple_stream2.inline.h"
 #include "runtime/tuple_row.h"
 #include "util/bitmap.h"
 #include "util/hash_util.hpp"
@@ -506,7 +506,7 @@ class PartitionedHashTable {
   /// of two formats, depending on the number of tuples in the row.
   union HtData {
     // For rows with multiple tuples per row, a pointer to the flattened TupleRow.
-    BufferedTupleStream3::FlatRowPtr flat_row;
+    BufferedTupleStream2::RowIdx idx;
     Tuple* tuple;
   };
 
@@ -567,7 +567,7 @@ class PartitionedHashTable {
   ///  - initial_num_buckets: number of buckets that the hash table should be initialized
   ///    with.
   static PartitionedHashTable* Create(Suballocator* allocator, bool stores_duplicates,
-      int num_build_tuples, BufferedTupleStream3* tuple_stream, int64_t max_num_buckets,
+      int num_build_tuples, BufferedTupleStream2* tuple_stream, int64_t max_num_buckets,
       int64_t initial_num_buckets);
 
   /// Allocates the initial bucket structure. Returns a non-OK status if an error is
@@ -590,7 +590,7 @@ class PartitionedHashTable {
   /// is stored. The 'row' is not copied by the hash table and the caller must guarantee
   /// it stays in memory. This will not grow the hash table.
   bool IR_ALWAYS_INLINE Insert(PartitionedHashTableCtx* ht_ctx,
-      BufferedTupleStream3::FlatRowPtr flat_row, TupleRow* row,
+      const BufferedTupleStream2::RowIdx& idx, TupleRow* row,
       Status* status);
 
   /// Prefetch the hash table bucket which the given hash value 'hash' maps to.
@@ -807,7 +807,7 @@ class PartitionedHashTable {
   ///  - quadratic_probing: set to true when the probing algorithm is quadratic, as
   ///    opposed to linear.
   PartitionedHashTable(bool quadratic_probing, Suballocator* allocator, bool stores_duplicates,
-      int num_build_tuples, BufferedTupleStream3* tuple_stream, int64_t max_num_buckets,
+      int num_build_tuples, BufferedTupleStream2* tuple_stream, int64_t max_num_buckets,
       int64_t initial_num_buckets);
 
   /// Performs the probing operation according to the probing algorithm (linear or
@@ -906,7 +906,7 @@ class PartitionedHashTable {
   /// Stream contains the rows referenced by the hash table. Can be NULL if the
   /// row only contains a single tuple, in which case the TupleRow indirection
   /// is removed by the hash table.
-  BufferedTupleStream3* tuple_stream_;
+  BufferedTupleStream2* tuple_stream_;
 
   /// Constants on how the hash table should behave.
 

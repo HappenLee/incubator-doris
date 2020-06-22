@@ -401,14 +401,14 @@ constexpr double PartitionedHashTable::MAX_FILL_FACTOR;
 constexpr int64_t PartitionedHashTable::DATA_PAGE_SIZE;
 
 PartitionedHashTable* PartitionedHashTable::Create(Suballocator* allocator, bool stores_duplicates,
-    int num_build_tuples, BufferedTupleStream3* tuple_stream, int64_t max_num_buckets,
+    int num_build_tuples, BufferedTupleStream2* tuple_stream, int64_t max_num_buckets,
     int64_t initial_num_buckets) {
   return new PartitionedHashTable(config::enable_quadratic_probing, allocator, stores_duplicates,
       num_build_tuples, tuple_stream, max_num_buckets, initial_num_buckets);
 }
 
 PartitionedHashTable::PartitionedHashTable(bool quadratic_probing, Suballocator* allocator,
-    bool stores_duplicates, int num_build_tuples, BufferedTupleStream3* stream,
+    bool stores_duplicates, int num_build_tuples, BufferedTupleStream2* stream,
     int64_t max_num_buckets, int64_t num_buckets)
   : allocator_(allocator),
     tuple_stream_(stream),
@@ -543,7 +543,8 @@ void PartitionedHashTable::DebugStringTuple(std::stringstream& ss, HtData& htdat
   if (stores_tuples_) {
     ss << "(" << htdata.tuple << ")";
   } else {
-    ss << "(" << htdata.flat_row << ")";
+      ss << "(" << htdata.idx.block() << "," << htdata.idx.idx()
+        << "," << htdata.idx.offset() << ")";
   }
   if (desc != NULL) {
     Tuple* row[num_build_tuples_];
