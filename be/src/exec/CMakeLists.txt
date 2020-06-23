@@ -87,6 +87,8 @@ set(EXEC_FILES
     partitioned_hash_table_ir.cc
     partitioned_aggregation_node.cc
     partitioned_aggregation_node_ir.cc
+    partitioned_hash_join_node.cc
+    partitioned_hash_join_node_ir.cc
     local_file_writer.cpp
     broker_writer.cpp
     parquet_scanner.cpp
