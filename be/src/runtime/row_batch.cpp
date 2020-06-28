@@ -273,7 +273,7 @@ void RowBatch::clear() {
         return;
     }
 
-    _tuple_data_pool->free_all();
+    _tuple_data_pool->free_all()    ;
     _agg_object_pool.reset(new ObjectPool());
     for (int i = 0; i < _io_buffers.size(); ++i) {
         _io_buffers[i]->return_buffer();

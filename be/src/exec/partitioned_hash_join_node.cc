@@ -129,8 +129,8 @@ Status PartitionedHashJoinNode::prepare(RuntimeState* state) {
 //    LlvmCodeGen* codegen;
 //    RETURN_IF_ERROR(state->GetCodegen(&codegen));
 //  }
-
   RETURN_IF_ERROR(BlockingJoinNode::prepare(state));
+  build_batch_.reset(new RowBatch(child(1)->row_desc(), state->batch_size(), mem_tracker()));
   runtime_state_ = state;
 
   // build and probe exprs are evaluated in the context of the rows produced by our
@@ -167,20 +167,22 @@ Status PartitionedHashJoinNode::prepare(RuntimeState* state) {
       _join_op == TJoinOp::RIGHT_ANTI_JOIN || _join_op == TJoinOp::FULL_OUTER_JOIN ||
       std::accumulate(is_not_distinct_from_.begin(), is_not_distinct_from_.end(), false,
                       std::logical_or<bool>());
-  std::vector<Expr*> build_expr(build_expr_ctxs_.size());
-  std::vector<Expr*> probe_expr(probe_expr_ctxs_.size());
-  std::transform(build_expr_ctxs_.begin(), build_expr_ctxs_.end(), build_expr.begin(), [](ExprContext* ec){
+
+  build_exprs_.resize(build_expr_ctxs_.size());
+  probe_exprs_.resize(probe_expr_ctxs_.size());
+  std::transform(build_expr_ctxs_.begin(), build_expr_ctxs_.end(), build_exprs_.begin(), [](ExprContext* ec){
       return ec->root();
   });
-  std::transform(probe_expr_ctxs_.begin(), probe_expr_ctxs_.end(), probe_expr.begin(), [](ExprContext* ec){
+  std::transform(probe_expr_ctxs_.begin(), probe_expr_ctxs_.end(), probe_exprs_.begin(), [](ExprContext* ec){
       return ec->root();
   });
 
-  RETURN_IF_ERROR(PartitionedHashTableCtx::Create(_pool, state, build_expr, probe_expr,
+  RETURN_IF_ERROR(PartitionedHashTableCtx::Create(_pool, state, build_exprs_, probe_exprs_,
       should_store_nulls, is_not_distinct_from_, state->fragment_hash_seed(),
       MAX_PARTITION_DEPTH, child(1)->row_desc().tuple_descriptors().size(), expr_mem_pool(),
       expr_mem_pool(), expr_mem_tracker(), child(1)->row_desc(), child(0)->row_desc(),
       &ht_ctx_));
+
   if (_join_op == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) {
     null_aware_eval_timer_ = ADD_TIMER(runtime_profile(), "NullAwareAntiJoinEvalTime");
   }
@@ -251,7 +253,7 @@ Status PartitionedHashJoinNode::prepare(RuntimeState* state) {
 
 Status PartitionedHashJoinNode::open(RuntimeState* state) {
   SCOPED_TIMER(_runtime_profile->total_time_counter());
-  RETURN_IF_ERROR(BlockingJoinNode::open(state));
+//  RETURN_IF_ERROR(BlockingJoinNode::open(state));
   RETURN_IF_ERROR(Expr::open(build_expr_ctxs_, state));
   RETURN_IF_ERROR(Expr::open(probe_expr_ctxs_, state));
   RETURN_IF_ERROR(Expr::open(other_join_conjunct_ctxs_, state));
@@ -653,7 +655,9 @@ Status PartitionedHashJoinNode::SpillPartition(Partition** spilled_partition) {
   return Status::OK();
 }
 
-Status PartitionedHashJoinNode::ProcessBuildInput(RuntimeState* state) {
+void PartitionedHashJoinNode::init_get_next(TupleRow* first_left_row) {}
+
+Status PartitionedHashJoinNode::construct_build_side(RuntimeState* state) {
   // Do a full scan of child(1) and partition the rows.
   {
 //    SCOPED_STOP_WATCH(&built_probe_overlap_stop_watch_);
@@ -1153,8 +1157,8 @@ void PartitionedHashJoinNode::OutputUnmatchedBuild(RowBatch* out_batch) {
     }
   }
 
-  auto num_rows_returned = out_batch->num_rows() - start_num_rows;
-  COUNTER_UPDATE(_rows_returned_counter, num_rows_returned);
+  _num_rows_returned += out_batch->num_rows() - start_num_rows;
+  COUNTER_UPDATE(_rows_returned_counter, _num_rows_returned);
 }
 
 Status PartitionedHashJoinNode::PrepareNullAwareNullProbe() {

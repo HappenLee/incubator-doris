@@ -76,7 +76,8 @@ class PartitionedHashJoinNode : public BlockingJoinNode {
 
  protected:
   virtual void AddToDebugString(int indentation_level, std::stringstream* out) const;
-  virtual Status ProcessBuildInput(RuntimeState* state);
+  virtual void init_get_next(TupleRow* first_left_row);
+  virtual Status construct_build_side(RuntimeState* state);
 
  private:
   class Partition;
@@ -404,6 +405,9 @@ class PartitionedHashJoinNode : public BlockingJoinNode {
   /// build_expr_ctxs_ (over child(1)) and probe_expr_ctxs_ (over child(0))
   std::vector<ExprContext*> probe_expr_ctxs_;
   std::vector<ExprContext*> build_expr_ctxs_;
+
+  std::vector<Expr*> probe_exprs_;
+  std::vector<Expr*> build_exprs_;
 
   /// List of filters to build during build phase.
 //  std::vector<FilterContext> filters_;

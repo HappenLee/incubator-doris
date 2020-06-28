@@ -82,6 +82,7 @@ Status BlockingJoinNode::close(RuntimeState* state) {
     // TODO(zhaochun): avoid double close
     // if (is_closed()) return Status::OK();
     _left_batch.reset();
+    build_batch_.reset();
     ExecNode::close(state);
     return Status::OK();
 }

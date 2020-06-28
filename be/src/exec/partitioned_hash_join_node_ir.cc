@@ -367,10 +367,12 @@ int PartitionedHashJoinNode::ProcessProbeBatch(TPrefetchMode::type prefetch_mode
   DCHECK(!out_batch->at_capacity());
   DCHECK_GE(_left_batch_pos, 0);
   RowBatch::Iterator out_batch_iterator(out_batch, out_batch->add_row());
-  const int max_rows = out_batch->capacity() - out_batch->num_rows();
+  const long max_rows = out_batch->capacity() - out_batch->num_rows();
   // Note that '_left_batch_pos' is the row no. of the row after '_current_left_child_row'.
   RowBatch::Iterator probe_batch_iterator(_left_batch.get(), _left_batch_pos);
-  int remaining_capacity = max_rows;
+  int target_capacity = _limit == -1 ? max_rows : std::min(max_rows, _limit - _num_rows_returned);
+  int remaining_capacity = target_capacity;
+
   bool has_probe_rows = _current_left_child_row != NULL || !probe_batch_iterator.at_end();
   PartitionedHashTableCtx::ExprValuesCache* expr_vals_cache = ht_ctx->expr_values_cache();
 
@@ -418,7 +420,7 @@ int PartitionedHashJoinNode::ProcessProbeBatch(TPrefetchMode::type prefetch_mode
 
   int num_rows_added;
   if (LIKELY(status->ok())) {
-    num_rows_added = max_rows - remaining_capacity;
+    num_rows_added = target_capacity - remaining_capacity;
   } else {
     num_rows_added = -1;
   }

@@ -46,6 +46,7 @@
 #include "exec/schema_scan_node.h"
 #include "exec/select_node.h"
 #include "exec/spill_sort_node.h"
+#include "exec/partitioned_hash_join_node.h"
 #include "exec/topn_node.h"
 #include "exec/union_node.h"
 #include "exprs/expr_context.h"
@@ -384,7 +385,8 @@ Status ExecNode::create_node(RuntimeState* state, ObjectPool* pool, const TPlanN
         }
         return Status::OK();
     case TPlanNodeType::HASH_JOIN_NODE:
-        *node = pool->add(new HashJoinNode(pool, tnode, descs));
+       //*node = pool->add(new HashJoinNode(pool, tnode, descs));
+        *node = pool->add(new PartitionedHashJoinNode(pool, tnode, descs));
         return Status::OK();
 
     case TPlanNodeType::CROSS_JOIN_NODE:
