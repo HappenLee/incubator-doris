@@ -34,7 +34,8 @@ BlockingJoinNode::BlockingJoinNode(const std::string& node_name,
                                    const DescriptorTbl& descs)
     : ExecNode(pool, tnode, descs),
       _node_name(node_name),
-      _join_op(join_op) {
+      _join_op(join_op),
+      semi_join_staging_row_(nullptr){
 }
 
 Status BlockingJoinNode::init(const TPlanNode& tnode, RuntimeState* state) {
@@ -74,6 +75,12 @@ Status BlockingJoinNode::prepare(RuntimeState* state) {
     _probe_tuple_row_size = num_left_tuples * sizeof(Tuple*);
     _build_tuple_row_size = num_build_tuples * sizeof(Tuple*);
 
+    if (_join_op == TJoinOp::LEFT_ANTI_JOIN || _join_op == TJoinOp::LEFT_SEMI_JOIN ||
+        _join_op == TJoinOp::RIGHT_ANTI_JOIN || _join_op == TJoinOp::RIGHT_SEMI_JOIN ||
+        _join_op == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) {
+        semi_join_staging_row_ = reinterpret_cast<TupleRow*>(
+                new char[_probe_tuple_row_size + _build_tuple_row_size]);
+    }
     _left_batch.reset(new RowBatch(child(0)->row_desc(), state->batch_size(), mem_tracker()));
     return Status::OK();
 }
@@ -83,6 +90,7 @@ Status BlockingJoinNode::close(RuntimeState* state) {
     // if (is_closed()) return Status::OK();
     _left_batch.reset();
     build_batch_.reset();
+    if (semi_join_staging_row_ != nullptr) delete[] semi_join_staging_row_;
     ExecNode::close(state);
     return Status::OK();
 }

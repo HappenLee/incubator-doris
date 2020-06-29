@@ -90,8 +90,12 @@ Status PartitionedHashJoinNode::init(const TPlanNode& tnode, RuntimeState* state
     probe_expr_ctxs_.push_back(ctx);
     RETURN_IF_ERROR(Expr::create_expr_tree(_pool, eq_join_conjuncts[i].right, &ctx));
     build_expr_ctxs_.push_back(ctx);
-//    is_not_distinct_from_.push_back(eq_join_conjuncts[i].is_not_distinct_from);
-    is_not_distinct_from_.push_back(true);
+    if (eq_join_conjuncts[i].__isset.opcode
+        && eq_join_conjuncts[i].opcode == TExprOpcode::EQ_FOR_NULL) {
+        is_not_distinct_from_.push_back(true);
+    } else {
+        is_not_distinct_from_.push_back(false);
+    }
   }
   RETURN_IF_ERROR(
       Expr::create_expr_trees(_pool, tnode.hash_join_node.other_join_conjuncts,
@@ -509,8 +513,8 @@ Status PartitionedHashJoinNode::Partition::BuildHashTable(RuntimeState* state,
     DCHECK_EQ(batch.num_rows(), indices.size());
     DCHECK_LE(batch.num_rows(), hash_tbl_->EmptyBuckets())
         << build_rows()->row_consumes_memory();
-//    TPrefetchMode::type prefetch_mode = state->query_options().prefetch_mode;
-    TPrefetchMode::type prefetch_mode = TPrefetchMode::NONE;
+    TPrefetchMode::type prefetch_mode = config::enable_prefetch ? TPrefetchMode::HT_BUCKET :
+            TPrefetchMode::NONE;
     SCOPED_TIMER(parent_->_build_timer);
     if (parent_->insert_batch_fn_ != NULL) {
       InsertBatchFn insert_batch_fn;
@@ -1034,8 +1038,8 @@ Status PartitionedHashJoinNode::get_next(RuntimeState* state, RowBatch* out_batc
       // Putting SCOPED_TIMER in ProcessProbeBatch() causes weird exception handling IR
       // in the xcompiled function, so call it here instead.
       int rows_added = 0;
-//      TPrefetchMode::type prefetch_mode = state->query_options().prefetch_mode;
-      TPrefetchMode::type prefetch_mode = TPrefetchMode::NONE;
+      TPrefetchMode::type prefetch_mode = config::enable_prefetch ? TPrefetchMode::HT_BUCKET :
+              TPrefetchMode::NONE;
       SCOPED_TIMER(_left_child_timer);
 //      if (process_build_batch_fn_ == NULL) {
         rows_added = ProcessProbeBatch(_join_op, prefetch_mode, out_batch, ht_ctx_.get(),
