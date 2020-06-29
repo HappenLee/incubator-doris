@@ -530,15 +530,15 @@ void RowBatch::transfer_resource_ownership(RowBatch* dest) {
             buffer_info.client, std::move(buffer_info.buffer), FlushMode::NO_FLUSH_RESOURCES);
     }
 
-    for (int i = 0; i < _tuple_streams.size(); ++i) {
-        dest->_tuple_streams.push_back(_tuple_streams[i]);
-        dest->_auxiliary_mem_usage += _tuple_streams[i]->byte_size();
-    }
-
-    for (int i = 0; i < _blocks.size(); ++i) {
-        dest->_blocks.push_back(_blocks[i]);
-        dest->_auxiliary_mem_usage += _blocks[i]->buffer_len();
-    }
+//    for (int i = 0; i < _tuple_streams.size(); ++i) {
+//        dest->_tuple_streams.push_back(_tuple_streams[i]);
+//        dest->_auxiliary_mem_usage += _tuple_streams[i]->byte_size();
+//    }
+//
+//    for (int i = 0; i < _blocks.size(); ++i) {
+//        dest->_blocks.push_back(_blocks[i]);
+//        dest->_auxiliary_mem_usage += _blocks[i]->buffer_len();
+//    }
 
     dest->_need_to_return |= _need_to_return;
 

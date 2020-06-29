@@ -167,9 +167,12 @@ Status BufferedTupleStream2::switch_to_io_buffers(bool* got_buffer) {
 }
 
 void BufferedTupleStream2::close() {
-    for (list<BufferedBlockMgr2::Block*>::iterator it = _blocks.begin();
-            it != _blocks.end(); ++it) {
-        (*it)->del();
+//    for (list<BufferedBlockMgr2::Block*>::iterator it = _blocks.begin();
+//            it != _blocks.end(); ++it) {
+//        (*it)->del();
+//    }
+    for (auto block:_blocks) {
+        block->del();
     }
     _blocks.clear();
     _num_pinned = 0;

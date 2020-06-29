@@ -257,6 +257,8 @@ Status PartitionedHashJoinNode::open(RuntimeState* state) {
   RETURN_IF_ERROR(Expr::open(build_expr_ctxs_, state));
   RETURN_IF_ERROR(Expr::open(probe_expr_ctxs_, state));
   RETURN_IF_ERROR(Expr::open(other_join_conjunct_ctxs_, state));
+  if (ht_ctx_.get() != nullptr) RETURN_IF_ERROR(ht_ctx_->Open(state));
+
 //  for (const FilterContext& filter: filters_) RETURN_IF_ERROR(filter.expr->Open(state));
 //  AllocateRuntimeFilters(state);
 
