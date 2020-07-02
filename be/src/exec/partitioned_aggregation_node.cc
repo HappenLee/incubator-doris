@@ -691,7 +691,9 @@ Status PartitionedAggregationNode::close(RuntimeState* state) {
   ClosePartitions();
   child_batch_.reset();
 
-  state->block_mgr2()->clear_reservations(client_);
+  if (client_ != nullptr) {
+      state->block_mgr2()->clear_reservations(client_);
+  }
   // Close all the agg-fn-evaluators
   NewAggFnEvaluator::Close(agg_fn_evals_, state);
 
