@@ -89,7 +89,8 @@ bool IR_ALWAYS_INLINE PartitionedHashJoinNode::ProcessProbeRowRightSemiJoins(
       }
     }
     // Create output row assembled from build tuples.
-    out_batch_iterator->parent()->copy_row(matched_build_row, out_row);
+//    out_batch_iterator->parent()->copy_row(matched_build_row, out_row);
+    create_output_row(out_row, nullptr, matched_build_row);
     // Update the hash table to indicate that this entry has been matched.
     hash_tbl_iterator_.SetMatched();
     if (JoinOp == TJoinOp::RIGHT_SEMI_JOIN &&
@@ -126,8 +127,8 @@ bool IR_ALWAYS_INLINE PartitionedHashJoinNode::ProcessProbeRowLeftSemiJoins(
         continue;
       }
     }
-    // Create output row assembled from probe tuples.
-    out_batch_iterator->parent()->copy_row(_current_left_child_row, out_row);
+    create_output_row(out_row, _current_left_child_row, matched_build_row);
+//      // Create output row assembled from probe tuples.
     // A match is found in the hash table. The search is over for this probe row.
     matched_probe_ = true;
     hash_tbl_iterator_.SetAtEnd();
@@ -160,7 +161,7 @@ bool IR_ALWAYS_INLINE PartitionedHashJoinNode::ProcessProbeRowLeftSemiJoins(
     }
     // No match for this _current_left_child_row, we need to output it. No need to
     // evaluate the conjunct_ctxs since anti joins cannot have any.
-    out_batch_iterator->parent()->copy_row(_current_left_child_row, out_row);
+    create_output_row(out_row, _current_left_child_row, nullptr);
     matched_probe_ = true;
     --(*remaining_capacity);
     if (*remaining_capacity == 0) return false;
@@ -415,7 +416,7 @@ int PartitionedHashJoinNode::ProcessProbeBatch(TPrefetchMode::type prefetch_mode
     if (!has_probe_rows) DCHECK(probe_batch_iterator.at_end());
     // Update where we are in the probe batch.
     _left_batch_pos = (probe_batch_iterator.get() - _left_batch->get_row(0)) /
-        _left_batch->num_tuples_per_row();
+            _left_batch->num_tuples_per_row();
   }
 
   int num_rows_added;

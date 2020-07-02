@@ -134,7 +134,6 @@ Status PartitionedHashJoinNode::prepare(RuntimeState* state) {
 //    RETURN_IF_ERROR(state->GetCodegen(&codegen));
 //  }
   RETURN_IF_ERROR(BlockingJoinNode::prepare(state));
-  build_batch_.reset(new RowBatch(child(1)->row_desc(), state->batch_size(), mem_tracker()));
   runtime_state_ = state;
 
   // build and probe exprs are evaluated in the context of the rows produced by our
@@ -376,11 +375,11 @@ PartitionedHashJoinNode::Partition::Partition(RuntimeState* state,
     level_(level) {
   build_rows_ = new BufferedTupleStream2(state, parent_->child(1)->row_desc(),
       state->block_mgr2(), parent_->block_mgr_client_,
-      true /* use_initial_small_buffers */, false /* read_write */);
+      level == 0 /* use_initial_small_buffers */, false /* read_write */);
   DCHECK(build_rows_ != NULL);
   probe_rows_ = new BufferedTupleStream2(state, parent_->child(0)->row_desc(),
       state->block_mgr2(), parent_->block_mgr_client_,
-      true /* use_initial_small_buffers */, false /* read_write */ );
+      level == 0 /* use_initial_small_buffers */, false /* read_write */ );
   DCHECK(probe_rows_ != NULL);
 }
 
@@ -1132,11 +1131,7 @@ void PartitionedHashJoinNode::OutputUnmatchedBuild(RowBatch* out_batch) {
     if (!hash_tbl_iterator_.IsMatched()) {
       TupleRow* build_row = hash_tbl_iterator_.GetRow();
       DCHECK(build_row != NULL);
-      if (_join_op == TJoinOp::RIGHT_ANTI_JOIN) {
-        out_batch->copy_row(build_row, out_batch_iterator.get());
-      } else {
-        create_output_row(out_batch_iterator.get(), NULL, build_row);
-      }
+      create_output_row(out_batch_iterator.get(), NULL, build_row);
       if (ExecNode::eval_conjuncts(conjunct_ctxs, num_conjuncts,
           out_batch_iterator.get())) {
         out_batch->commit_last_row();

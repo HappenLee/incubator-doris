@@ -35,6 +35,7 @@ BlockingJoinNode::BlockingJoinNode(const std::string& node_name,
     : ExecNode(pool, tnode, descs),
       _node_name(node_name),
       _join_op(join_op),
+      _current_left_child_row(nullptr),
       semi_join_staging_row_(nullptr){
 }
 
@@ -82,6 +83,7 @@ Status BlockingJoinNode::prepare(RuntimeState* state) {
                 new char[_probe_tuple_row_size + _build_tuple_row_size]);
     }
     _left_batch.reset(new RowBatch(child(0)->row_desc(), state->batch_size(), mem_tracker()));
+    build_batch_.reset(new RowBatch(child(1)->row_desc(), state->batch_size(), mem_tracker()));
     return Status::OK();
 }
 
