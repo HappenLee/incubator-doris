@@ -499,7 +499,7 @@ Status PartitionedHashJoinNode::Partition::BuildHashTable(RuntimeState* state,
   // We always start with small pages in the hash table.
   int64_t estimated_num_buckets = build_rows()->row_consumes_memory() ?
       PartitionedHashTable::EstimateNumBuckets(build_rows()->num_rows()) : state->batch_size() * 2;
-  hash_tbl_.reset(PartitionedHashTable::Create(parent_->ht_allocator_.get(),
+  hash_tbl_.reset(PartitionedHashTable::Create(state, parent_->block_mgr_client_, parent_->ht_allocator_.get(),
       true /* store_duplicates */,
       parent_->child(1)->row_desc().tuple_descriptors().size(), build_rows(),
       1 << (32 - NUM_PARTITIONING_BITS), estimated_num_buckets));
@@ -868,7 +868,8 @@ Status PartitionedHashJoinNode::PrepareNextPartition(RuntimeState* state) {
   }
   ht_ctx_->set_level(input_partition_->level_);
 
-  int64_t mem_limit = mem_tracker()->spare_capacity();
+  int64_t mem_limit = mem_tracker()->spare_capacity() +
+          state->block_mgr2()->available_buffers(block_mgr_client_) * state->block_mgr2()->max_block_size();
   // Try to build a hash table on top the spilled build rows.
   bool built = false;
   int64_t estimated_memory = input_partition_->EstimatedInMemSize();

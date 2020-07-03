@@ -761,7 +761,7 @@ Status PartitionedAggregationNode::Partition::InitHashTable(bool* got_memory) {
   // TODO: we could switch to 64 bit hashes and then we don't need a max size.
   // It might be reasonable to limit individual hash table size for other reasons
   // though. Always start with small buffers.
-  hash_tbl.reset(PartitionedHashTable::Create(parent->ht_allocator_.get(), false, 1, nullptr,
+  hash_tbl.reset(PartitionedHashTable::Create(parent->state_, parent->client_, parent->ht_allocator_.get(), false, 1, nullptr,
       1L << (32 - NUM_PARTITIONING_BITS), PAGG_DEFAULT_HASH_TABLE_SZ));
   // Please update the error message in CreateHashPartitions() if initial size of
   // hash table changes.

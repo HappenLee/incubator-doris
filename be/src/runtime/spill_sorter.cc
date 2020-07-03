@@ -1129,7 +1129,7 @@ Status SpillSorter::input_done() {
         int min_buffers_for_merge = _sorted_runs.size() * blocks_per_run;
         // Check if the final run needs to be unpinned.
         bool unpinned_final = false;
-        if (_block_mgr->num_free_buffers() < min_buffers_for_merge - blocks_per_run) {
+        if (_block_mgr->available_buffers(_block_mgr_client) < min_buffers_for_merge - blocks_per_run) {
             // Number of available buffers is less than the size of the final run and
             // the buffers needed to read the remainder of the runs in memory.
             // Unpin the final run.

@@ -566,7 +566,7 @@ class PartitionedHashTable {
   ///    -1, if it unlimited.
   ///  - initial_num_buckets: number of buckets that the hash table should be initialized
   ///    with.
-  static PartitionedHashTable* Create(Suballocator* allocator, bool stores_duplicates,
+  static PartitionedHashTable* Create(RuntimeState* state, BufferedBlockMgr2::Client* client, Suballocator* allocator, bool stores_duplicates,
       int num_build_tuples, BufferedTupleStream2* tuple_stream, int64_t max_num_buckets,
       int64_t initial_num_buckets);
 
@@ -806,7 +806,7 @@ class PartitionedHashTable {
   /// of calling this constructor directly.
   ///  - quadratic_probing: set to true when the probing algorithm is quadratic, as
   ///    opposed to linear.
-  PartitionedHashTable(bool quadratic_probing, Suballocator* allocator, bool stores_duplicates,
+  PartitionedHashTable(bool quadratic_probing, RuntimeState* state, Suballocator* allocator, BufferedBlockMgr2::Client* client, bool stores_duplicates,
       int num_build_tuples, BufferedTupleStream2* tuple_stream, int64_t max_num_buckets,
       int64_t initial_num_buckets);
 
@@ -902,6 +902,9 @@ class PartitionedHashTable {
 
   /// Suballocator to allocate data pages and hash table buckets with.
   Suballocator* allocator_;
+
+  /// Client to allocate data pages with.
+  BufferedBlockMgr2::Client* block_mgr_client_;
 
   /// Stream contains the rows referenced by the hash table. Can be NULL if the
   /// row only contains a single tuple, in which case the TupleRow indirection
