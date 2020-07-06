@@ -36,7 +36,7 @@ BlockingJoinNode::BlockingJoinNode(const std::string& node_name,
       _node_name(node_name),
       _join_op(join_op),
       _current_left_child_row(nullptr),
-      semi_join_staging_row_(nullptr){
+      _semi_join_staging_row(nullptr){
 }
 
 Status BlockingJoinNode::init(const TPlanNode& tnode, RuntimeState* state) {
@@ -79,11 +79,11 @@ Status BlockingJoinNode::prepare(RuntimeState* state) {
     if (_join_op == TJoinOp::LEFT_ANTI_JOIN || _join_op == TJoinOp::LEFT_SEMI_JOIN ||
         _join_op == TJoinOp::RIGHT_ANTI_JOIN || _join_op == TJoinOp::RIGHT_SEMI_JOIN ||
         _join_op == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) {
-        semi_join_staging_row_ = reinterpret_cast<TupleRow*>(
+        _semi_join_staging_row = reinterpret_cast<TupleRow*>(
                 new char[_probe_tuple_row_size + _build_tuple_row_size]);
     }
     _left_batch.reset(new RowBatch(child(0)->row_desc(), state->batch_size(), mem_tracker()));
-    build_batch_.reset(new RowBatch(child(1)->row_desc(), state->batch_size(), mem_tracker()));
+    _build_batch.reset(new RowBatch(child(1)->row_desc(), state->batch_size(), mem_tracker()));
     return Status::OK();
 }
 
@@ -91,8 +91,8 @@ Status BlockingJoinNode::close(RuntimeState* state) {
     // TODO(zhaochun): avoid double close
     // if (is_closed()) return Status::OK();
     _left_batch.reset();
-    build_batch_.reset();
-    if (semi_join_staging_row_ != nullptr) delete[] semi_join_staging_row_;
+    _build_batch.reset();
+    if (_semi_join_staging_row != nullptr) delete[] _semi_join_staging_row;
     ExecNode::close(state);
     return Status::OK();
 }

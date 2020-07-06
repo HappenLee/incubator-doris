@@ -82,9 +82,9 @@ bool IR_ALWAYS_INLINE PartitionedHashJoinNode::ProcessProbeRowRightSemiJoins(
     // Evaluate the non-equi-join conjuncts against a temp row assembled from all
     // build and probe tuples.
     if (num_other_join_conjuncts > 0) {
-      create_output_row(semi_join_staging_row_, _current_left_child_row, matched_build_row);
+      create_output_row(_semi_join_staging_row, _current_left_child_row, matched_build_row);
       if (!EvalOtherJoinConjuncts(other_join_conjunct_ctxs,
-          num_other_join_conjuncts, semi_join_staging_row_)) {
+          num_other_join_conjuncts, _semi_join_staging_row)) {
         continue;
       }
     }
@@ -121,16 +121,16 @@ bool IR_ALWAYS_INLINE PartitionedHashJoinNode::ProcessProbeRowLeftSemiJoins(
     // Evaluate the non-equi-join conjuncts against a temp row assembled from all
     // build and probe tuples.
     if (num_other_join_conjuncts > 0) {
-      create_output_row(semi_join_staging_row_, _current_left_child_row, matched_build_row);
+      create_output_row(_semi_join_staging_row, _current_left_child_row, matched_build_row);
       if (!EvalOtherJoinConjuncts(other_join_conjunct_ctxs,
-          num_other_join_conjuncts, semi_join_staging_row_)) {
+          num_other_join_conjuncts, _semi_join_staging_row)) {
         continue;
       }
     }
     create_output_row(out_row, _current_left_child_row, matched_build_row);
 //      // Create output row assembled from probe tuples.
     // A match is found in the hash table. The search is over for this probe row.
-    matched_probe_ = true;
+    _matched_probe = true;
     hash_tbl_iterator_.SetAtEnd();
     // Append to output batch for left semi joins if the conjuncts are satisfied.
     if (JoinOp == TJoinOp::LEFT_SEMI_JOIN &&
@@ -143,7 +143,7 @@ bool IR_ALWAYS_INLINE PartitionedHashJoinNode::ProcessProbeRowLeftSemiJoins(
     return true;
   }
 
-  if (JoinOp != TJoinOp::LEFT_SEMI_JOIN && !matched_probe_) {
+  if (JoinOp != TJoinOp::LEFT_SEMI_JOIN && !_matched_probe) {
     if (JoinOp == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) {
       // Null aware behavior. The probe row did not match in the hash table so we
       // should interpret the hash table probe as "unknown" if there are nulls on the
@@ -162,7 +162,7 @@ bool IR_ALWAYS_INLINE PartitionedHashJoinNode::ProcessProbeRowLeftSemiJoins(
     // No match for this _current_left_child_row, we need to output it. No need to
     // evaluate the conjunct_ctxs since anti joins cannot have any.
     create_output_row(out_row, _current_left_child_row, nullptr);
-    matched_probe_ = true;
+    _matched_probe = true;
     --(*remaining_capacity);
     if (*remaining_capacity == 0) return false;
     out_row = out_batch_iterator->next();
@@ -190,7 +190,7 @@ bool IR_ALWAYS_INLINE PartitionedHashJoinNode::ProcessProbeRowOuterJoins(
       continue;
     }
     // At this point the probe is considered matched.
-    matched_probe_ = true;
+    _matched_probe = true;
     if (JoinOp == TJoinOp::RIGHT_OUTER_JOIN || JoinOp == TJoinOp::FULL_OUTER_JOIN) {
       // There is a match for this build row. Mark the Bucket or the DuplicateNode
       // as matched for right/full outer joins.
@@ -206,11 +206,11 @@ bool IR_ALWAYS_INLINE PartitionedHashJoinNode::ProcessProbeRowOuterJoins(
     }
   }
 
-  if (JoinOp != TJoinOp::RIGHT_OUTER_JOIN && !matched_probe_) {
+  if (JoinOp != TJoinOp::RIGHT_OUTER_JOIN && !_matched_probe) {
     // No match for this row, we need to output it if it's a left/full outer join.
     create_output_row(out_row, _current_left_child_row, NULL);
     if (ExecNode::eval_conjuncts(conjunct_ctxs, num_conjuncts, out_row)) {
-      matched_probe_ = true;
+      _matched_probe = true;
       --(*remaining_capacity);
       if (*remaining_capacity == 0) return false;
       out_row = out_batch_iterator->next();
@@ -257,7 +257,7 @@ bool IR_ALWAYS_INLINE PartitionedHashJoinNode::NextProbeRow(
     // Establish _current_left_child_row and find its corresponding partition.
     DCHECK(!probe_batch_iterator->at_end());
     _current_left_child_row = probe_batch_iterator->get();
-    matched_probe_ = false;
+    _matched_probe = false;
 
     // True if the current row should be skipped for probing.
     bool skip_row = false;

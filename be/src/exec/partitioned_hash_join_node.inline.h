@@ -26,7 +26,7 @@ namespace doris {
 inline void PartitionedHashJoinNode::ResetForProbe() {
   _current_left_child_row = NULL;
   _left_batch_pos = 0;
-  matched_probe_ = true;
+  _matched_probe = true;
   hash_tbl_iterator_.SetAtEnd();
   ht_ctx_->expr_values_cache()->Reset();
 }

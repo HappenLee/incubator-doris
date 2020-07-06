@@ -64,7 +64,7 @@ protected:
     boost::scoped_ptr<MemPool> _build_pool;  // holds everything referenced from build side
 
     /// Store in node to avoid reallocating. Cleared after build completes.
-    boost::scoped_ptr<RowBatch> build_batch_;
+    boost::scoped_ptr<RowBatch> _build_batch;
 
     // _left_batch must be cleared before calling get_next().  The child node
     // does not initialize all tuple ptrs in the row, only the ones that it
@@ -73,7 +73,7 @@ protected:
     int _left_batch_pos;  // current scan pos in _left_batch
     bool _left_side_eos;  // if true, left child has no more rows to process
     TupleRow* _current_left_child_row;
-    bool matched_probe_;  // if true, the current probe row is matched
+    bool _matched_probe;  // if true, the current probe row is matched
 
     // _build_tuple_idx[i] is the tuple index of child(1)'s tuple[i] in the output row
     std::vector<int> _build_tuple_idx;
@@ -91,7 +91,7 @@ protected:
     /// Row assembled from all lhs and rhs tuples used for evaluating the non-equi-join
     /// conjuncts for semi joins. Semi joins only return the lhs or rhs output tuples,
     /// so this tuple is temporarily assembled for evaluating the conjuncts.
-    TupleRow* semi_join_staging_row_;
+    TupleRow* _semi_join_staging_row;
 
     RuntimeProfile::Counter* _build_timer;   // time to prepare build side
     RuntimeProfile::Counter* _left_child_timer;   // time to process left child batch
