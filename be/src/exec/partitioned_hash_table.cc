@@ -437,7 +437,8 @@ PartitionedHashTable::PartitionedHashTable(bool quadratic_probing, RuntimeState*
 
 Status PartitionedHashTable::Init(bool* got_memory) {
   int64_t buckets_byte_size = num_buckets_ * sizeof(Bucket);
-  if (!state_->block_mgr2()->consume_memory(block_mgr_client_, buckets_byte_size)) {
+  auto allocate_bytes = allocator_->ComputeAllocateBufferSize(buckets_byte_size);
+  if (!state_->block_mgr2()->consume_memory(block_mgr_client_, allocate_bytes)) {
       num_buckets_ = 0;
       *got_memory = false;
       return Status::OK();
@@ -445,7 +446,7 @@ Status PartitionedHashTable::Init(bool* got_memory) {
 
   RETURN_IF_ERROR(allocator_->Allocate(buckets_byte_size, &bucket_allocation_));
   if (bucket_allocation_ == nullptr) {
-      state_->block_mgr2()->release_memory(block_mgr_client_, buckets_byte_size);
+      state_->block_mgr2()->release_memory(block_mgr_client_, allocate_bytes);
       num_buckets_ = 0;
       *got_memory = false;
       return Status::OK();
@@ -464,11 +465,15 @@ void PartitionedHashTable::Close() {
   // TODO: These statistics should go to the runtime profile as well.
   if ((num_buckets_ > LARGE_HT) || (num_probes_ > HEAVILY_USED)) VLOG(2) << PrintStats();
 
-  int64_t buckets_byte_size = num_buckets_ * sizeof(Bucket);
-  state_->block_mgr2()->release_memory(block_mgr_client_, buckets_byte_size);
-  for (auto& data_page : data_pages_) allocator_->Free(move(data_page));
+  int64_t free_bytes = 0;
+  for (auto& data_page : data_pages_) {
+      free_bytes += allocator_->Free(move(data_page));
+  }
   data_pages_.clear();
-  if (bucket_allocation_ != nullptr) allocator_->Free(move(bucket_allocation_));
+  if (bucket_allocation_ != nullptr) {
+      free_bytes += allocator_->Free(move(bucket_allocation_));
+  }
+  state_->block_mgr2()->release_memory(block_mgr_client_, free_bytes);
 }
 
 Status PartitionedHashTable::CheckAndResize(
@@ -505,9 +510,9 @@ Status PartitionedHashTable::ResizeBuckets(
   // of the old hash table.
   // int64_t old_size = num_buckets_ * sizeof(Bucket);
   int64_t new_size = num_buckets * sizeof(Bucket);
-  int64_t old_size = num_buckets_ * sizeof(Bucket);
+  int64_t allocate_bytes = allocator_->ComputeAllocateBufferSize(new_size);
 
-  if (!state_->block_mgr2()->consume_memory(block_mgr_client_, new_size)) {
+  if (!state_->block_mgr2()->consume_memory(block_mgr_client_, allocate_bytes)) {
       *got_memory = false;
       return Status::OK();
   }
@@ -538,8 +543,9 @@ Status PartitionedHashTable::ResizeBuckets(
   }
 
   num_buckets_ = num_buckets;
-  state_->block_mgr2()->release_memory(block_mgr_client_, old_size);
-  allocator_->Free(move(bucket_allocation_));
+  auto free_bytes = allocator_->Free(move(bucket_allocation_));
+  state_->block_mgr2()->release_memory(block_mgr_client_, free_bytes);
+
   bucket_allocation_ = std::move(new_allocation);
   buckets_ = reinterpret_cast<Bucket*>(bucket_allocation_->data());
   *got_memory = true;
@@ -547,13 +553,14 @@ Status PartitionedHashTable::ResizeBuckets(
 }
 
 bool PartitionedHashTable::GrowNodeArray(Status* status) {
- if (!state_->block_mgr2()->consume_memory(block_mgr_client_, DATA_PAGE_SIZE)) {
+  auto allocate_bytes = allocator_->ComputeAllocateBufferSize(DATA_PAGE_SIZE);
+  if (!state_->block_mgr2()->consume_memory(block_mgr_client_, allocate_bytes)) {
      return false;
   }
   std::unique_ptr<Suballocation> allocation;
   *status = allocator_->Allocate(DATA_PAGE_SIZE, &allocation);
   if (!status->ok() || allocation == nullptr) {
-      state_->block_mgr2()->release_memory(block_mgr_client_, DATA_PAGE_SIZE);
+      state_->block_mgr2()->release_memory(block_mgr_client_, allocate_bytes);
       return false;
   }
   next_node_ = reinterpret_cast<DuplicateNode*>(allocation->data());

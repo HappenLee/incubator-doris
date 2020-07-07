@@ -315,13 +315,13 @@ bool BufferedBlockMgr2::try_acquire_tmp_reservation(Client* client, int num_buff
 bool BufferedBlockMgr2::consume_memory(Client* client, int64_t size) {
     // Workaround IMPALA-1619. Return immediately if the allocation size will cause
     // an arithmetic overflow.
+    if (size == 0) return true;
     if (UNLIKELY(size >= (1LL << 31))) {
         LOG(WARNING) << "Trying to allocate memory >=2GB (" << size << ")B."
             << get_stack_trace();
         return false;
     }
     int buffers_needed = BitUtil::ceil(size, max_block_size());
-    DCHECK_GT(buffers_needed, 0) << "Trying to consume 0 memory";
     unique_lock<mutex> lock(_lock);
 
     if (size < max_block_size() && _mem_tracker->try_consume(size)) {
