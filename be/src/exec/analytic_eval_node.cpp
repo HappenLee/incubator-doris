@@ -53,6 +53,7 @@ AnalyticEvalNode::AnalyticEvalNode(ObjectPool* pool, const TPlanNode& tnode,
         _dummy_result_tuple(NULL),
         _curr_partition_idx(-1),
         _prev_input_row(NULL),
+        client_(nullptr),
         _input_eos(false),
         _evaluation_timer(NULL) {
     if (tnode.analytic_node.__isset.buffered_tuple_id) {

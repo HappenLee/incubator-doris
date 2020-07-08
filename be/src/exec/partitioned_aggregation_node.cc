@@ -133,8 +133,8 @@ PartitionedAggregationNode::PartitionedAggregationNode(
     singleton_output_tuple_returned_(true),
     partition_eos_(false),
     child_eos_(false),
-    partition_pool_(new ObjectPool()) {
-
+    partition_pool_(new ObjectPool()),
+    client_(nullptr){
   DCHECK_EQ(PARTITION_FANOUT, 1 << NUM_PARTITIONING_BITS);
 
     if (tnode.agg_node.__isset.use_streaming_preaggregation) {
