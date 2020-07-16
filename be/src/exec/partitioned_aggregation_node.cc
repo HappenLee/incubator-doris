@@ -1161,19 +1161,19 @@ Status PartitionedAggregationNode::CreateHashPartitions(
   for (int i = 0; i < PARTITION_FANOUT; ++i) {
     Partition* partition = hash_partitions_[i];
     if (partition == nullptr) continue;
-    if (partition->aggregated_row_stream == nullptr) {
-      // Failed to create the aggregated row stream - cannot create a hash table.
-      // Just continue with a NULL hash table so rows will be passed through.
-      DCHECK(is_streaming_preagg_);
-    } else {
-      bool got_memory;
-      RETURN_IF_ERROR(partition->InitHashTable(&got_memory));
-      // Spill the partition if we cannot create a hash table for a merge aggregation.
-      if (UNLIKELY(!got_memory)) {
-        DCHECK(!is_streaming_preagg_) << "Preagg reserves enough memory for hash tables";
+    bool got_memory;
+    RETURN_IF_ERROR(partition->InitHashTable(&got_memory));
+    if (UNLIKELY(!got_memory)) {
+        if (is_streaming_preagg_) {
+            int64_t alloc_size = PAGG_DEFAULT_HASH_TABLE_SZ * partition->hash_tbl->BucketSize();
+            string details = Substitute("Cannot perform aggregation at node with id $0."
+                                        " Failed to initialize hash table in preaggregation. The memory limit"
+                                        " is too low to execute the query.", _id);
+            return mem_tracker()->MemLimitExceeded(state_, details, alloc_size);
+        }
+        // Spill the partition if we cannot create a hash table for a merge aggregation.
         // If we're repartitioning, we will be writing aggregated rows first.
         RETURN_IF_ERROR(partition->Spill(level > 0));
-      }
     }
     hash_tbls_[i] = partition->hash_tbl.get();
   }

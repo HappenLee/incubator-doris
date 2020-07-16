@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <exec/exec_node.h>
 #include "runtime/buffered_block_mgr2.h"
 
 #include "runtime/exec_env.h"
@@ -219,7 +220,8 @@ BufferedBlockMgr2::BufferedBlockMgr2(RuntimeState* state, TmpFileMgr* tmp_file_m
     _non_local_outstanding_writes(0),
     _io_mgr(state->exec_env()->disk_io_mgr()),
     _is_cancelled(false),
-    _writes_issued(0) {
+    _writes_issued(0),
+    _state(state){
 }
 
 Status BufferedBlockMgr2::create(
@@ -331,7 +333,7 @@ bool BufferedBlockMgr2::consume_memory(Client* client, int64_t size) {
         return true;
     }
 
-    if (std::max<int64_t>(0, remaining_unreserved_buffers()) +
+    if (available_buffers(client) +
             client->_num_tmp_reserved_buffers < buffers_needed) {
         return false;
     }
@@ -436,7 +438,15 @@ Status BufferedBlockMgr2::mem_limit_too_low_error(Client* client, int node_id) {
         << PrettyPrinter::print(
                 client->_num_reserved_buffers * max_block_size(), TUnit::BYTES)
         << ".";
-    return Status::MemoryLimitExceeded(error_msg.str());
+    return add_exec_msg(error_msg.str());
+}
+
+Status BufferedBlockMgr2::add_exec_msg(const std::string& msg) const {
+    stringstream str;
+    str << msg << " ";
+    str << "Backend: " << BackendOptions::get_localhost() << ", ";
+    str << "fragment: " << print_id(_state->fragment_instance_id()) << " ";
+    return Status::MemoryLimitExceeded(str.str());
 }
 
 Status BufferedBlockMgr2::get_new_block(
@@ -1034,7 +1044,7 @@ Status BufferedBlockMgr2::find_buffer_for_block(Block* block, bool* in_mem) {
                     << endl << debug_internal() << endl << client->debug_string();
                 VLOG_QUERY << ss.str();
             }
-            return Status::MemoryLimitExceeded("Query did not have enough memory to get the minimum required "
+            return add_exec_msg("Query did not have enough memory to get the minimum required "
                                                "buffers in the block manager.");
         }
 
@@ -1089,8 +1099,8 @@ Status BufferedBlockMgr2::find_buffer(
         // There are no free buffers. If spills are disabled or there no unpinned blocks we
         // can write, return. We can't get a buffer.
         if (!_enable_spill) {
-            return Status::InternalError("Spilling has been disabled for plans,"
-                    "current memory usage has reached the bottleneck."
+            return add_exec_msg("Spilling has been disabled for plans,"
+                    "current memory usage has reached the bottleneck. "
                     "You can avoid the behavior via increasing the mem limit "
                     "by session variable exec_mem_limior or enable spilling.");
         }

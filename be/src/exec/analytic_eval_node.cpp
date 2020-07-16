@@ -711,7 +711,7 @@ Status AnalyticEvalNode::process_child_batch(RuntimeState* state) {
 
     // Transfer resources to _prev_tuple_pool when enough resources have accumulated
     // and the _prev_tuple_pool has already been transfered to an output batch.
-    if (_curr_tuple_pool->total_allocated_bytes() > MAX_TUPLE_POOL_SIZE &&
+    if (_curr_tuple_pool->total_allocated_bytes() > state->block_mgr2()->max_block_size() / 2 &&
             (_prev_pool_last_result_idx == -1 || _prev_pool_last_window_idx == -1)) {
         _prev_tuple_pool->acquire_data(_curr_tuple_pool.get(), false);
         _prev_pool_last_result_idx = _last_result_idx;

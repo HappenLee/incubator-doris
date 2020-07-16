@@ -411,6 +411,7 @@ int PartitionedHashJoinNode::ProcessProbeBatch(TPrefetchMode::type prefetch_mode
       DCHECK(status->ok());
     } while (NextProbeRow<JoinOp>(ht_ctx, &probe_batch_iterator, &remaining_capacity,
         status));
+    ht_ctx_->expr_results_pool_->clear();
     // Update whether there are more probe rows to process in the current batch.
     has_probe_rows = _current_left_child_row != NULL;
     if (!has_probe_rows) DCHECK(probe_batch_iterator.at_end());

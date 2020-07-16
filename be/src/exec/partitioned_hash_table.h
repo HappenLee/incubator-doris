@@ -361,6 +361,7 @@ class PartitionedHashTableCtx {
 
  private:
   friend class PartitionedAggregationNode;
+  friend class PartitionedHashJoinNode;
   friend class PartitionedHashTable;
   friend class HashTableTest_HashEmpty_Test;
 

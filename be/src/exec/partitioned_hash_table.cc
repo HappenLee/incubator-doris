@@ -184,11 +184,11 @@ void PartitionedHashTableCtx::Close(RuntimeState* state) {
 }
 
 void PartitionedHashTableCtx::FreeBuildLocalAllocations() {
-  //ExprContext::FreeLocalAllocations(build_expr_evals_);
+  ExprContext::free_local_allocations(build_expr_evals_);
 }
 
 void PartitionedHashTableCtx::FreeProbeLocalAllocations() {
-  //ExprContext::FreeLocalAllocations(probe_expr_evals_);
+  ExprContext::free_local_allocations(probe_expr_evals_);
 }
 
 void PartitionedHashTableCtx::FreeLocalAllocations() {

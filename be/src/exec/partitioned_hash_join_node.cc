@@ -248,6 +248,7 @@ Status PartitionedHashJoinNode::open(RuntimeState* state) {
   // (e.g. calling UdfBuiltins::Lower()). The probe expressions' local allocations need to
   // be freed now as they don't get freed again till probing. Other exprs' local allocations
   // are freed in ExecNode::free_local_allocations() in ProcessBuildInput().
+  ht_ctx_->FreeProbeLocalAllocations();
   ExprContext::free_local_allocations(probe_expr_ctxs_);
 
   RETURN_IF_ERROR(BlockingJoinNode::open(state));
@@ -487,7 +488,7 @@ Status PartitionedHashJoinNode::Partition::BuildHashTable(RuntimeState* state,
     }
     
 //    RETURN_IF_ERROR(state->GetQueryStatus());
-//    parent_->free_local_allocations();
+    parent_->ht_ctx_->FreeLocalAllocations();
     batch.reset();
   } while (!eos);
 
@@ -602,7 +603,7 @@ Status PartitionedHashJoinNode::SpillPartition(Partition** spilled_partition) {
   }
 
   if (partition_idx == -1) {
-    // Could not find a partition to spill. This means the mem limit was just too low.
+      // Could not find a partition to spill. This means the mem limit was just too low.
     return runtime_state_->block_mgr2()->mem_limit_too_low_error(block_mgr_client_, id());
   }
 
@@ -631,7 +632,7 @@ Status PartitionedHashJoinNode::construct_build_side(RuntimeState* state) {
 Status PartitionedHashJoinNode::ProcessBuildInput(RuntimeState* state, int level) {
   if (UNLIKELY(level >= MAX_PARTITION_DEPTH)) {
       std::stringstream error_msg;
-      error_msg << "Cannot perform aggregation at hash join node with id "
+      error_msg << "Cannot perform join at hash join node with id "
                 << _id << '.'
                 << " The input data was partitioned the maximum number of "
                 << MAX_PARTITION_DEPTH << " times."
@@ -1018,6 +1019,7 @@ Status PartitionedHashJoinNode::get_next(RuntimeState* state, RowBatch* out_batc
     // Free local allocations of the probe side expressions only after ExprValuesCache
     // has been reset.
     DCHECK(ht_ctx_->expr_values_cache()->AtEnd());
+    ht_ctx_->FreeProbeLocalAllocations();
     ExprContext::free_local_allocations(probe_expr_ctxs_);
 
     // We want to return as soon as we have attached a tuple stream to the out_batch
