@@ -360,7 +360,7 @@ public class BDBJEJournal implements Journal {
                 restore.execute(insufficientLogEx, config);
                 bdbEnvironment.close();
                 bdbEnvironment.setup(new File(environmentPath), selfNodeName, selfNodeHostPort, 
-                                     helperNode.first + ":" + helperNode.second, Catalog.getCurrentCatalog().isElectable());
+                                     helperNode.first + ":" + helperNode.second, Catalog.getInstance().isElectable());
             }
         }
     }

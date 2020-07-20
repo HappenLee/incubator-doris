@@ -257,6 +257,43 @@ public class TabletInvertedIndex {
                  tabletMigrationMap.size(), transactionsToClear.size(), transactionsToPublish.size(), (end - start));
     }
 
+    public long getDbId(long tabletId) {
+        readLock();
+        try {
+            if (tabletMetaMap.containsKey(tabletId)) {
+                return tabletMetaMap.get(tabletId).getDbId();
+            }
+            return NOT_EXIST_VALUE;
+        } finally {
+            readUnlock();
+        }
+    }
+
+    public long getTableId(long tabletId) {
+        readLock();
+        try {
+            if (tabletMetaMap.containsKey(tabletId)) {
+                return tabletMetaMap.get(tabletId).getTableId();
+            }
+            return NOT_EXIST_VALUE;
+        } finally {
+            readUnlock();
+        }
+    }
+    
+    public TabletMeta getTabletMetaByReplica(long replicaId) {
+        readLock();
+        try {
+            Long tabletId = replicaToTabletMap.get(replicaId);
+            if (tabletId == null) {
+                return null;
+            }
+            return tabletMetaMap.get(tabletId);
+        } finally {
+            readUnlock();
+        }
+    }
+    
     public Long getTabletIdByReplica(long replicaId) {
         readLock();
         try {
