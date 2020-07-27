@@ -385,8 +385,11 @@ Status ExecNode::create_node(RuntimeState* state, ObjectPool* pool, const TPlanN
         }
         return Status::OK();
     case TPlanNodeType::HASH_JOIN_NODE:
-     //   *node = pool->add(new HashJoinNode(pool, tnode, descs));
-       *node = pool->add(new PartitionedHashJoinNode(pool, tnode, descs));
+        if (state->enable_partition_hash_join()) {
+            *node = pool->add(new PartitionedHashJoinNode(pool, tnode, descs));
+        } else {
+            *node = pool->add(new HashJoinNode(pool, tnode, descs));
+        }
         return Status::OK();
 
     case TPlanNodeType::CROSS_JOIN_NODE:

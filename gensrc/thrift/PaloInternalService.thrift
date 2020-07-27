@@ -138,6 +138,10 @@ struct TQueryOptions {
   30: optional i32 max_pushdown_conditions_per_column
   // whether enable spilling to disk
   31: optional bool enable_spilling = false;
+
+  // if set true. BE use partitionhashjoin node replace hashjoin node
+  // only partitionhashjoin node can spill to disk
+  33: optional bool enable_partition_hash_join = false;
 }
     
 

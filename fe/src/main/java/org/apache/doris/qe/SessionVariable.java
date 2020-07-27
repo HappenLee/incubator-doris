@@ -69,6 +69,7 @@ public class SessionVariable implements Serializable, Writable {
     public static final int MIN_EXEC_MEM_LIMIT = 2097152;   
     public static final String BATCH_SIZE = "batch_size";
     public static final String DISABLE_STREAMING_PREAGGREGATIONS = "disable_streaming_preaggregations";
+    public static final String ENABLE_PARTITION_HASH_JOIN = "enable_partition_hash_join";
     public static final String DISABLE_COLOCATE_JOIN = "disable_colocate_join";
     public static final String PARALLEL_FRAGMENT_EXEC_INSTANCE_NUM = "parallel_fragment_exec_instance_num";
     public static final String ENABLE_INSERT_STRICT = "enable_insert_strict";
@@ -204,6 +205,9 @@ public class SessionVariable implements Serializable, Writable {
 
     @VariableMgr.VarAttr(name = DISABLE_STREAMING_PREAGGREGATIONS)
     private boolean disableStreamPreaggregations = false;
+
+    @VariableMgr.VarAttr(name = ENABLE_PARTITION_HASH_JOIN)
+    private boolean enablePartitionHashJoin= false;
 
     @VariableMgr.VarAttr(name = DISABLE_COLOCATE_JOIN)
     private boolean disableColocateJoin = false;
@@ -499,6 +503,7 @@ public class SessionVariable implements Serializable, Writable {
 
         tResult.setBatch_size(batchSize);
         tResult.setDisable_stream_preaggregations(disableStreamPreaggregations);
+        tResult.setEnable_partition_hash_join(enablePartitionHashJoin);
         tResult.setLoad_mem_limit(loadMemLimit);
 
         if (maxScanKeyNum > -1) {
