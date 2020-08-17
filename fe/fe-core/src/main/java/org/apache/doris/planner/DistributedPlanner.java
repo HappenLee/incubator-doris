@@ -385,6 +385,30 @@ public class DistributedPlanner {
             node.setColocate(false, reason.get(0));
         }
 
+        List<Expr> rhsPartitionxprs = Lists.newArrayList();
+        if (canHalfShuffleJoin(node, leftChildFragment, reason, rhsPartitionxprs)) {
+            node.setHalfShuffle(true, "");
+            DataPartition rhsJoinPartition =
+                    new DataPartition(TPartitionType.HALF_SHFFULE_HASH_PARTITIONED, rhsPartitionxprs);
+            ExchangeNode rhsExchange =
+                    new ExchangeNode(ctx_.getNextNodeId(), rightChildFragment.getPlanRoot(), false);
+            rhsExchange.setNumInstances(rightChildFragment.getPlanRoot().getNumInstances());
+            rhsExchange.init(ctx_.getRootAnalyzer());
+
+            //node.setDistributionMode(HashJoinNode.DistributionMode.PARTITIONED);
+            node.setChild(0, leftChildFragment.getPlanRoot());
+            node.setChild(1, rhsExchange);
+            leftChildFragment.setPlanRoot(node);
+
+            rightChildFragment.setDestination(rhsExchange);
+            rightChildFragment.setOutputPartition(rhsJoinPartition);
+
+            return leftChildFragment;
+        } else {
+            node.setHalfShuffle(false, reason.get(reason.size() - 1));
+        }
+
+
         if (doBroadcast) {
             node.setDistributionMode(HashJoinNode.DistributionMode.BROADCAST);
             // Doesn't create a new fragment, but modifies leftChildFragment to execute
@@ -487,6 +511,69 @@ public class DistributedPlanner {
         return false;
     }
 
+    private boolean canHalfShuffleJoin(HashJoinNode node, PlanFragment leftChildFragment,
+                                    List<String> cannotReason, List<Expr> rhsHashExprs) {
+        if (ConnectContext.get().getSessionVariable().isDisableColocateJoin()) {
+            cannotReason.add("Session disabled");
+            return false;
+        }
+        PlanNode leftRoot = leftChildFragment.getPlanRoot();
+
+        //leftRoot should be ScanNode or HashJoinNode, rightRoot should be ScanNode
+        if (leftRoot instanceof OlapScanNode) {
+            return canHalfShuffleJoin(node, leftRoot, cannotReason, rhsHashExprs);
+        }
+
+        return false;
+    }
+
+    //the table must be colocate
+    //the colocate group must be stable
+    //the eqJoinConjuncts must contain the distributionColumns
+    private boolean canHalfShuffleJoin(HashJoinNode node, PlanNode leftRoot,
+                                    List<String> cannotReason, List<Expr> rhsJoinExprs) {
+        OlapScanNode leftScanNode = ((OlapScanNode) leftRoot);
+        //1 the table must be colocate
+        if (leftScanNode.getSelectedPartitionIds().size() > 1) {
+            cannotReason.add("more than one partition");
+            return false;
+        }
+
+        DistributionInfo leftDistribution = leftScanNode.getOlapTable().getDefaultDistributionInfo();
+
+        if (leftDistribution instanceof HashDistributionInfo ) {
+            List<Column> leftDistributeColumns = ((HashDistributionInfo) leftDistribution).getDistributionColumns();
+
+            List<Column> leftJoinColumns = new ArrayList<>();
+            List<Expr> rightExprs = new ArrayList<>();
+            List<BinaryPredicate> eqJoinConjuncts = node.getEqJoinConjuncts();
+
+            for (BinaryPredicate eqJoinPredicate : eqJoinConjuncts) {
+                Expr lhsJoinExpr = eqJoinPredicate.getChild(0);
+                Expr rhsJoinExpr = eqJoinPredicate.getChild(1);
+                if (lhsJoinExpr.unwrapSlotRef() == null || rhsJoinExpr.unwrapSlotRef() == null) {
+                    continue;
+                }
+
+                SlotDescriptor leftSlot = lhsJoinExpr.unwrapSlotRef().getDesc();
+
+                leftJoinColumns.add(leftSlot.getColumn());
+                rightExprs.add(rhsJoinExpr);
+            }
+
+            //2 the join columns should contains all distribute columns to enable colocate join
+            for (Column distributeColumn : leftDistributeColumns) {
+                int loc = leftJoinColumns.indexOf(distributeColumn);
+                if (loc == -1) {
+                    cannotReason.add("join column not match");
+                    return false;
+                }
+                rhsJoinExprs.add(rightExprs.get(loc));
+            }
+        }
+
+        return true;
+    }
     //the table must be colocate
     //the colocate group must be stable
     //the eqJoinConjuncts must contain the distributionColumns

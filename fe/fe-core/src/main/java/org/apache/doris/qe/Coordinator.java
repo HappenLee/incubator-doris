@@ -746,6 +746,7 @@ public class Coordinator {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("fragment {} has instances {}", params.fragment.getFragmentId(), params.instanceExecParams.size());
             }
+
             for (int j = 0; j < params.instanceExecParams.size(); ++j) {
                 // we add instance_num to query_id.lo to create a
                 // globally-unique instance id
@@ -783,13 +784,34 @@ public class Coordinator {
                         params.instanceExecParams.size() + destParams.perExchNumSenders.get(exchId.asInt()));
             }
 
-            // add destination host to this fragment's destination
-            for (int j = 0; j < destParams.instanceExecParams.size(); ++j) {
-                TPlanFragmentDestination dest = new TPlanFragmentDestination();
-                dest.fragment_instance_id = destParams.instanceExecParams.get(j).instanceId;
-                dest.server = toRpcHost(destParams.instanceExecParams.get(j).host);
-                dest.setBrpc_server(toBrpcHost(destParams.instanceExecParams.get(j).host));
-                params.destinations.add(dest);
+            if (isHalfShuffleJoin(destFragment.getFragmentId().asInt(), destFragment.getPlanRoot())) {
+                int bucketSeq = 0;
+                int destCount = 0;
+                while (bucketSeq < maxBucketNum) {
+                    TPlanFragmentDestination dest = new TPlanFragmentDestination();
+                    if (destCount == destParams.instanceExecParams.size() || destParams.instanceExecParams.get(destCount).bucketSeq != bucketSeq) {
+                        dest.fragment_instance_id = new TUniqueId(-1, -1);
+                        dest.server = toRpcHost(destParams.instanceExecParams.get(0).host);
+                        dest.setBrpc_server(toBrpcHost(destParams.instanceExecParams.get(0).host));
+                    } else {
+                        dest.fragment_instance_id = destParams.instanceExecParams.get(destCount).instanceId;
+                        dest.server = toRpcHost(destParams.instanceExecParams.get(destCount).host);
+                        dest.setBrpc_server(toBrpcHost(destParams.instanceExecParams.get(destCount).host));
+                        destCount++;
+                    }
+                    bucketSeq++;
+
+                    params.destinations.add(dest);
+                }
+            } else {
+                // add destination host to this fragment's destination
+                for (int j = 0; j < destParams.instanceExecParams.size(); ++j) {
+                    TPlanFragmentDestination dest = new TPlanFragmentDestination();
+                    dest.fragment_instance_id = destParams.instanceExecParams.get(j).instanceId;
+                    dest.server = toRpcHost(destParams.instanceExecParams.get(j).host);
+                    dest.setBrpc_server(toBrpcHost(destParams.instanceExecParams.get(j).host));
+                    params.destinations.add(dest);
+                }
             }
         }
     }
@@ -978,7 +1000,7 @@ public class Coordinator {
             }
 
             //for ColocateJoin fragment
-            if (isColocateJoin(fragment.getPlanRoot()) && fragmentIdToSeqToAddressMap.containsKey(fragment.getFragmentId())
+            if ((isColocateJoin(fragment.getPlanRoot()) || isHalfShuffleJoin(fragment.getFragmentId().asInt(), fragment.getPlanRoot())) && fragmentIdToSeqToAddressMap.containsKey(fragment.getFragmentId())
                     && fragmentIdToSeqToAddressMap.get(fragment.getFragmentId()).size() > 0) {
                 Map<Integer, TNetworkAddress> bucketSeqToAddress = fragmentIdToSeqToAddressMap.get(fragment.getFragmentId());
                 for (Map.Entry<Integer, Map<Integer, List<TScanRangeParams>>> scanRanges : bucketSeqToScanRange.entrySet()) {
@@ -989,6 +1011,7 @@ public class Coordinator {
                         instanceParam.perNodeScanRanges.put(nodeScanRange.getKey(), nodeScanRange.getValue());
                     }
 
+                    instanceParam.setBucketSeq(scanRanges.getKey());
                     params.instanceExecParams.add(instanceParam);
                 }
             } else {
@@ -1068,6 +1091,32 @@ public class Coordinator {
 
         return false;
     }
+
+    // One fragment could only have one HashJoinNode
+    private boolean isHalfShuffleJoin(int fragmentId, PlanNode node) {
+        //cache the colocateFragmentIds
+        if (fragmentId != node.getFragmentId().asInt()) {
+            return false;
+        }
+
+        if (halfShuffleFragmentIds.contains(node.getFragmentId().asInt())) {
+            return true;
+        }
+
+        if (node instanceof HashJoinNode) {
+            HashJoinNode joinNode = (HashJoinNode) node;
+            if (joinNode.isHalfShuffle()) {
+                halfShuffleFragmentIds.add(joinNode.getFragmentId().asInt());
+                return true;
+            }
+        }
+
+        for (PlanNode childNode : node.getChildren()) {
+            return isHalfShuffleJoin(fragmentId, childNode);
+        }
+
+        return false;
+    }
     
     // Returns the id of the leftmost node of any of the gives types in 'plan_root',
     // or INVALID_PLAN_NODE_ID if no such node present.
@@ -1117,7 +1166,7 @@ public class Coordinator {
 
             FragmentScanRangeAssignment assignment =
                     fragmentExecParamsMap.get(scanNode.getFragmentId()).scanRangeAssignment;
-            if (isColocateJoin(scanNode.getFragment().getPlanRoot())) {
+            if (isColocateJoin(scanNode.getFragment().getPlanRoot()) || isHalfShuffleJoin(scanNode.getFragmentId().asInt(), scanNode.getFragment().getPlanRoot())) {
                 computeScanRangeAssignmentByColocate((OlapScanNode) scanNode, assignment);
             } else {
                 computeScanRangeAssignmentByScheduler(scanNode, locations, assignment);
@@ -1129,6 +1178,7 @@ public class Coordinator {
     private void computeScanRangeAssignmentByColocate(
             final OlapScanNode scanNode,
             FragmentScanRangeAssignment assignment) throws Exception {
+        maxBucketNum = scanNode.getOlapTable().getDefaultDistributionInfo().getBucketNum();
 
         if (!fragmentIdToSeqToAddressMap.containsKey(scanNode.getFragmentId())) {
             fragmentIdToSeqToAddressMap.put(scanNode.getFragmentId(), new HashedMap());
@@ -1360,6 +1410,9 @@ public class Coordinator {
     private Map<PlanFragmentId, Map<Integer, TNetworkAddress>> fragmentIdToSeqToAddressMap = Maps.newHashMap();
     private Set<Integer> colocateFragmentIds = new HashSet<>();
 
+    private int maxBucketNum = -1;
+    private Set<Integer> halfShuffleFragmentIds = new HashSet<>();
+    private Map<PlanFragmentId, Map<Integer, TUniqueId>> fragmentIdsToBucketSeqInstanceIds = Maps.newHashMap();
     // record backend execute state
     // TODO(zhaochun): add profile information and others
     public class BackendExecState {
@@ -1660,9 +1713,15 @@ public class Coordinator {
         
         int perFragmentInstanceIdx;
         int senderId;
+
+        int bucketSeq = -1;
   
         FragmentExecParams fragmentExecParams;
-        
+
+        public void setBucketSeq(int bucketSeq) {
+            this.bucketSeq = bucketSeq;
+        }
+
         public FInstanceExecParam(TUniqueId id, TNetworkAddress host,
                 int perFragmentInstanceIdx, FragmentExecParams fragmentExecParams) {
             this.instanceId = id;

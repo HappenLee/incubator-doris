@@ -62,6 +62,8 @@ public class HashJoinNode extends PlanNode {
     private DistributionMode distrMode;
     private boolean isColocate = false; //the flag for colocate join
     private String colocateReason = ""; // if can not do colocate join, set reason here
+    private boolean isHalfShuffle = false; // the flag for half shuffle join
+    private String halfShuffleReason = ""; // if can not do half shuffle join, set reason here
 
     public HashJoinNode(PlanNodeId id, PlanNode outer, PlanNode inner, TableRef innerRef,
                         List<Expr> eqJoinConjuncts, List<Expr> otherJoinConjuncts) {
@@ -122,9 +124,18 @@ public class HashJoinNode extends PlanNode {
         return isColocate;
     }
 
+    public boolean isHalfShuffle() {
+        return isHalfShuffle;
+    }
+
     public void setColocate(boolean colocate, String reason) {
         isColocate = colocate;
         colocateReason = reason;
+    }
+
+    public void setHalfShuffle(boolean halfShuffle, String reason) {
+        isHalfShuffle = halfShuffle;
+        halfShuffleReason = reason;
     }
 
     @Override
@@ -275,6 +286,7 @@ public class HashJoinNode extends PlanNode {
           detailPrefix + "hash predicates:\n");
 
         output.append(detailPrefix + "colocate: " + isColocate + (isColocate? "" : ", reason: " + colocateReason) + "\n");
+        output.append(detailPrefix + "half-shuffle: " + isHalfShuffle + (isHalfShuffle? "" : ", reason: " + halfShuffleReason) + "\n");
 
         for (BinaryPredicate eqJoinPredicate : eqJoinConjuncts) {
             output.append(detailPrefix).append("equal join conjunct: ").append(eqJoinPredicate.toSql() +  "\n");
