@@ -786,23 +786,26 @@ public class Coordinator {
 
             if (isHalfShuffleJoin(destFragment.getFragmentId().asInt(), destFragment.getPlanRoot())) {
                 int bucketSeq = 0;
-                int destCount = 0;
                 while (bucketSeq < maxBucketNum) {
                     TPlanFragmentDestination dest = new TPlanFragmentDestination();
-                    if (destCount == destParams.instanceExecParams.size() || destParams.instanceExecParams.get(destCount).bucketSeq != bucketSeq) {
-                        dest.fragment_instance_id = new TUniqueId(-1, -1);
-                        dest.server = toRpcHost(destParams.instanceExecParams.get(0).host);
-                        dest.setBrpc_server(toBrpcHost(destParams.instanceExecParams.get(0).host));
-                    } else {
-                        dest.fragment_instance_id = destParams.instanceExecParams.get(destCount).instanceId;
-                        dest.server = toRpcHost(destParams.instanceExecParams.get(destCount).host);
-                        dest.setBrpc_server(toBrpcHost(destParams.instanceExecParams.get(destCount).host));
-                        destCount++;
-                    }
-                    bucketSeq++;
 
+                    dest.fragment_instance_id = new TUniqueId(-1, -1);
+                    dest.server = toRpcHost(destParams.instanceExecParams.get(0).host);
+                    dest.setBrpc_server(toBrpcHost(destParams.instanceExecParams.get(0).host));
+
+                    for (FInstanceExecParam instanceExecParams : destParams.instanceExecParams) {
+                        if (instanceExecParams.bucketSeqList.contains(bucketSeq)) {
+                            dest.fragment_instance_id = instanceExecParams.instanceId;
+                            dest.server = toRpcHost(instanceExecParams.host);
+                            dest.setBrpc_server(toBrpcHost(instanceExecParams.host));
+                            break;
+                        }
+                    }
+
+                    bucketSeq++;
                     params.destinations.add(dest);
                 }
+           //     params.destinations.sort(Comparator.comparing(t -> t.fragment_instance_id));
             } else {
                 // add destination host to this fragment's destination
                 for (int j = 0; j < destParams.instanceExecParams.size(); ++j) {
@@ -1003,16 +1006,33 @@ public class Coordinator {
             if ((isColocateJoin(fragment.getPlanRoot()) || isHalfShuffleJoin(fragment.getFragmentId().asInt(), fragment.getPlanRoot())) && fragmentIdToSeqToAddressMap.containsKey(fragment.getFragmentId())
                     && fragmentIdToSeqToAddressMap.get(fragment.getFragmentId()).size() > 0) {
                 Map<Integer, TNetworkAddress> bucketSeqToAddress = fragmentIdToSeqToAddressMap.get(fragment.getFragmentId());
+                BucketSeqToScanRange bucketSeqToScanRange = fragmentIdBucketSeqToScanRangeMap.get(fragment.getFragmentId());
+
+                Map<TNetworkAddress, FInstanceExecParam> addressToInstance = Maps.newHashMap();
                 for (Map.Entry<Integer, Map<Integer, List<TScanRangeParams>>> scanRanges : bucketSeqToScanRange.entrySet()) {
-                    FInstanceExecParam instanceParam = new FInstanceExecParam(null, bucketSeqToAddress.get(scanRanges.getKey()), 0, params);
+                    FInstanceExecParam instanceParam;
+                    TNetworkAddress address = bucketSeqToAddress.get(scanRanges.getKey());
+                    if (!addressToInstance.containsKey(address)) {
+                        instanceParam = new FInstanceExecParam(null, address, 0, params);
+                        addressToInstance.put(address, instanceParam);
+                    } else {
+                        instanceParam = addressToInstance.get(address);
+                    }
 
                     Map<Integer, List<TScanRangeParams>> nodeScanRanges = scanRanges.getValue();
                     for (Map.Entry<Integer, List<TScanRangeParams>> nodeScanRange : nodeScanRanges.entrySet()) {
-                        instanceParam.perNodeScanRanges.put(nodeScanRange.getKey(), nodeScanRange.getValue());
+                        if (instanceParam.perNodeScanRanges.containsKey(nodeScanRange.getKey())) {
+                            List<TScanRangeParams> scanRangeParamsList = instanceParam.perNodeScanRanges.get(nodeScanRange.getKey());
+                            scanRangeParamsList.addAll(nodeScanRange.getValue());
+                        } else {
+                            instanceParam.perNodeScanRanges.put(nodeScanRange.getKey(), nodeScanRange.getValue());
+                        }
                     }
 
                     instanceParam.setBucketSeq(scanRanges.getKey());
-                    params.instanceExecParams.add(instanceParam);
+                    if (!params.instanceExecParams.contains(instanceParam)) {
+                        params.instanceExecParams.add(instanceParam);
+                    }
                 }
             } else {
                 // case A
@@ -1182,8 +1202,10 @@ public class Coordinator {
 
         if (!fragmentIdToSeqToAddressMap.containsKey(scanNode.getFragmentId())) {
             fragmentIdToSeqToAddressMap.put(scanNode.getFragmentId(), new HashedMap());
+            fragmentIdBucketSeqToScanRangeMap.put(scanNode.getFragmentId(), new BucketSeqToScanRange());
         }
         Map<Integer, TNetworkAddress> bucketSeqToAddress = fragmentIdToSeqToAddressMap.get(scanNode.getFragmentId());
+        BucketSeqToScanRange bucketSeqToScanRange = fragmentIdBucketSeqToScanRangeMap.get(scanNode.getFragmentId());
 
         for(Integer bucketSeq: scanNode.bucketSeq2locations.keySet()) {
             //fill scanRangeParamsList
@@ -1406,7 +1428,7 @@ public class Coordinator {
 
     }
 
-    private BucketSeqToScanRange bucketSeqToScanRange = new BucketSeqToScanRange();
+    private Map<PlanFragmentId, BucketSeqToScanRange> fragmentIdBucketSeqToScanRangeMap = Maps.newHashMap();
     private Map<PlanFragmentId, Map<Integer, TNetworkAddress>> fragmentIdToSeqToAddressMap = Maps.newHashMap();
     private Set<Integer> colocateFragmentIds = new HashSet<>();
 
@@ -1714,12 +1736,12 @@ public class Coordinator {
         int perFragmentInstanceIdx;
         int senderId;
 
-        int bucketSeq = -1;
+        List<Integer> bucketSeqList = Lists.newLinkedList();
   
         FragmentExecParams fragmentExecParams;
 
         public void setBucketSeq(int bucketSeq) {
-            this.bucketSeq = bucketSeq;
+            this.bucketSeqList.add(bucketSeq);
         }
 
         public FInstanceExecParam(TUniqueId id, TNetworkAddress host,

@@ -34,7 +34,8 @@ import java.util.Map;
 public abstract class Resource implements Writable {
     public enum ResourceType {
         UNKNOWN,
-        SPARK;
+        SPARK,
+        EXTERNAL_TABLE;
 
         public static ResourceType fromString(String resourceType) {
             for (ResourceType type : ResourceType.values()) {
