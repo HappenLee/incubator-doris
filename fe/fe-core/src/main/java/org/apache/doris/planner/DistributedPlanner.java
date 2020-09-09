@@ -513,7 +513,7 @@ public class DistributedPlanner {
 
     private boolean canHalfShuffleJoin(HashJoinNode node, PlanFragment leftChildFragment,
                                     List<String> cannotReason, List<Expr> rhsHashExprs) {
-        if (ConnectContext.get().getSessionVariable().isDisableColocateJoin()) {
+        if (!ConnectContext.get().getSessionVariable().isEnableBucketShuffleJoin()) {
             cannotReason.add("Session disabled");
             return false;
         }

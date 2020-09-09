@@ -245,7 +245,7 @@ Status DataStreamSender::Channel::send_batch(PRowBatch* batch, bool eos) {
 }
 
 Status DataStreamSender::Channel::add_row(TupleRow* row) {
-    if (_fragment_instance_id.hi == -1) {
+    if (_fragment_instance_id.lo == -1) {
         return Status::OK();
     }
     int row_num = _batch->add_row();
@@ -340,16 +340,15 @@ DataStreamSender::DataStreamSender(
             || sink.output_partition.type == TPartitionType::HALF_SHFFULE_HASH_PARTITIONED);
     // TODO: use something like google3's linked_ptr here (scoped_ptr isn't copyable)
     std::map<int64_t, uint32_t> fragment_id_to_channel;
-
     for (int i = 0; i < destinations.size(); ++i) {
         // Select first dest as transfer chain.
         bool is_transfer_chain = (i == 0);
         const auto& fragment_instance_id = destinations[i].fragment_instance_id;
-        if (fragment_instance_id.hi == -1 || fragment_id_to_channel.find(fragment_instance_id.lo) == fragment_id_to_channel.end()) {
+        if (fragment_id_to_channel.find(fragment_instance_id.lo) == fragment_id_to_channel.end()) {
             _channel_shared_ptrs.emplace_back(
                     new Channel(this, row_desc,
                                 destinations[i].brpc_server,
-                                destinations[i].fragment_instance_id,
+                                fragment_instance_id,
                                 sink.dest_node_id, per_channel_buffer_size,
                                 is_transfer_chain, send_query_statistics_with_every_batch));
             fragment_id_to_channel.insert({fragment_instance_id.lo, _channel_shared_ptrs.size() - 1});
