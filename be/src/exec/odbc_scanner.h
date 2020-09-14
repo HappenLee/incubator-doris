@@ -71,7 +71,7 @@ public:
 
     // query for DORIS
     Status query(const std::string& table, const std::vector<std::string>& fields,
-                 const std::vector<std::string>& filters);
+                 std::vector<std::string>& filters, int64_t limit);
 
     Status get_next_row(bool* eos);
 
@@ -82,6 +82,12 @@ public:
 private:
     static std::string build_connect_string(const ODBCScannerParam& param);
 
+    static std::string build_query_string(TOdbcTableType::type type, const std::string& table,
+            const std::vector<std::string>& fields, std::vector<std::string>& filters, int64_t limit);
+
+    static std::string build_query_string(const std::string& prefix, const std::string& table,
+                                          const std::vector<std::string>& fields, const std::vector<std::string>& filters);
+
     static Status error_status(const std::string& prefix, const std::string& error_msg);
 
     static std::string handle_diagnostic_record (SQLHANDLE      hHandle,
@@ -89,7 +95,6 @@ private:
                                           RETCODE        RetCode);
 
     std::string _connect_string;
-    std::string _sql_str;
     TOdbcTableType::type _type;
     const TupleDescriptor* _tuple_desc;
 

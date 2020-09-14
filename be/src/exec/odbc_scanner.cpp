@@ -147,36 +147,12 @@ Status ODBCScanner::query(const std::string& query) {
 }
 
 Status ODBCScanner::query(const std::string& table, const std::vector<std::string>& fields,
-                       const std::vector<std::string>& filters) {
+                       std::vector<std::string>& filters, const int64_t limit) {
     if (!_is_open) {
         return Status::InternalError("Query before open.");
     }
 
-    _sql_str = "SELECT ";
-
-    for (int i = 0; i < fields.size(); ++i) {
-        if (0 != i) {
-            _sql_str += ",";
-        }
-
-        _sql_str += fields[i];
-    }
-
-    _sql_str += " FROM " + table;
-
-    if (!filters.empty()) {
-        _sql_str += " WHERE ";
-
-        for (int i = 0; i < filters.size(); ++i) {
-            if (0 != i) {
-                _sql_str += " AND";
-            }
-
-            _sql_str += " (" + filters[i] + ") ";
-        }
-    }
-
-    return query(_sql_str);
+    return query(build_query_string(_type, table, fields, filters, limit));
 }
 
 Status ODBCScanner::get_next_row(bool* eos) {
@@ -252,6 +228,57 @@ std::string ODBCScanner::build_connect_string(const ODBCScannerParam& param) {
     }
 
     return "";
+}
+
+std::string ODBCScanner::build_query_string(TOdbcTableType::type type, const std::string& table,
+        const std::vector<std::string>& fields, std::vector<std::string>& filters, int64_t limit) {
+    std::string query_string = "SELECT ";
+
+    // Oracle use the where clause to do limit
+    if (type == TOdbcTableType::ORACLE && limit != -1) {
+        filters.emplace_back("ROWNUM <= " + std::to_string(limit));
+    }
+
+    // MSSQL use select top to do limit
+    if (type == TOdbcTableType::SQLSERVER && limit != -1) {
+        query_string += "TOP" + std::to_string(limit) + " ";
+    }
+
+    query_string = build_query_string(query_string, table, fields, filters);
+
+    if (limit != -1 && (type == TOdbcTableType::MYSQL || type == TOdbcTableType::POSTGRESQL || type == TOdbcTableType::MONGODB)) {
+        query_string += " LIMIT " + std::to_string(limit);
+    }
+
+    return query_string;
+}
+
+std::string ODBCScanner::build_query_string(const std::string& prefix, const std::string& table,
+            const std::vector<std::string>& fields, const std::vector<std::string>& filters) {
+    std::string query_string(prefix);
+
+    for (int i = 0; i < fields.size(); ++i) {
+        if (0 != i) {
+            query_string += ",";
+        }
+
+        query_string += fields[i];
+    }
+    query_string += " FROM " + table;
+
+    if (!filters.empty()) {
+        query_string += " WHERE ";
+
+        for (int i = 0; i < filters.size(); ++i) {
+            if (0 != i) {
+                query_string += " AND";
+            }
+
+            query_string += " (" + filters[i] + ") ";
+        }
+    }
+
+    return query_string;
 }
 
 }
