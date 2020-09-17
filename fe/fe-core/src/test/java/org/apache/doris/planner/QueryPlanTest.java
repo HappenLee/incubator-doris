@@ -283,6 +283,27 @@ public class QueryPlanTest {
                 "(k1 int, k2 int) distributed by hash(k1) buckets 1\n" +
                 "properties(\"replication_num\" = \"1\");");
 
+        createTable("create table test.bucket_shuffle1\n" +
+                "(k1 int, k2 int, k3 int) distributed by hash(k1, k2) buckets 5\n" +
+                "properties(\"replication_num\" = \"1\"" +
+                ");");
+
+        createTable("CREATE TABLE test.`bucket_shuffle2` (\n" +
+                "  `k1` tinyint(4) NULL COMMENT \"\",\n" +
+                "  `k2` smallint(6) NULL COMMENT \"\"\n" +
+                ") ENGINE=OLAP\n" +
+                "COMMENT \"OLAP\"\n" +
+                "PARTITION BY RANGE(`k1`)\n" +
+                "(PARTITION p1 VALUES [(\"-128\"), (\"-64\")),\n" +
+                "PARTITION p2 VALUES [(\"-64\"), (\"0\")),\n" +
+                "PARTITION p3 VALUES [(\"0\"), (\"64\")))\n" +
+                "DISTRIBUTED BY HASH(k1, k2) BUCKETS 5\n" +
+                "PROPERTIES (\n" +
+                "\"replication_num\" = \"1\",\n" +
+                "\"in_memory\" = \"false\",\n" +
+                "\"storage_format\" = \"DEFAULT\"\n" +
+                ");");
+
         createTable("create table test.colocate1\n" +
                 "(k1 int, k2 int, k3 int) distributed by hash(k1, k2) buckets 1\n" +
                 "properties(\"replication_num\" = \"1\"," +
@@ -924,6 +945,56 @@ public class QueryPlanTest {
         queryStr = "explain select * from test.dynamic_partition t1, test.dynamic_partition t2 where t1.k1 = t2.k1";
         explainString = UtFrameUtils.getSQLPlanOrErrorMsg(connectContext, queryStr);
         Assert.assertTrue(explainString.contains("colocate: false"));
+    }
+
+    @Test
+    public void testBucketShuffleJoin() throws Exception {
+        FeConstants.runningUnitTest = true;
+
+        // set data size and row count for the olap table
+        Database db = Catalog.getCurrentCatalog().getDb("default_cluster:test");
+        OlapTable tbl = (OlapTable) db.getTable("bucket_shuffle1");
+        for (Partition partition : tbl.getPartitions()) {
+            partition.updateVisibleVersionAndVersionHash(2, 0);
+            for (MaterializedIndex mIndex : partition.getMaterializedIndices(IndexExtState.VISIBLE)) {
+                mIndex.setRowCount(10000);
+                for (Tablet tablet : mIndex.getTablets()) {
+                    for (Replica replica : tablet.getReplicas()) {
+                        replica.updateVersionInfo(2, 0, 200000, 10000);
+                    }
+                }
+            }
+        }
+
+        db = Catalog.getCurrentCatalog().getDb("default_cluster:test");
+        tbl = (OlapTable) db.getTable("bucket_shuffle2");
+        for (Partition partition : tbl.getPartitions()) {
+            partition.updateVisibleVersionAndVersionHash(2, 0);
+            for (MaterializedIndex mIndex : partition.getMaterializedIndices(IndexExtState.VISIBLE)) {
+                mIndex.setRowCount(10000);
+                for (Tablet tablet : mIndex.getTablets()) {
+                    for (Replica replica : tablet.getReplicas()) {
+                        replica.updateVersionInfo(2, 0, 200000, 10000);
+                    }
+                }
+            }
+        }
+
+        // single partition
+        String queryStr = "explain select * from test.jointest t1, test.bucket_shuffle1 t2 where t1.k1 = t2.k1 and t1.k1 = t2.k2";
+        String explainString = UtFrameUtils.getSQLPlanOrErrorMsg(connectContext, queryStr);
+        Assert.assertTrue(explainString.contains("BUCKET_SHFFULE"));
+        Assert.assertTrue(explainString.contains("BUCKET_SHFFULE_HASH_PARTITIONED: `t1`.`k1`, `t1`.`k1`"));
+
+        // left table distribution column not match
+        queryStr = "explain select * from test.jointest t1, test.bucket_shuffle1 t2 where t1.k1 = t2.k1";
+        explainString = UtFrameUtils.getSQLPlanOrErrorMsg(connectContext, queryStr);
+        Assert.assertTrue(!explainString.contains("BUCKET_SHFFULE"));
+
+        // multi partition, should not be bucket shuffle join
+        queryStr = "explain select * from test.jointest t1, test.bucket_shuffle2 t2 where t1.k1 = t2.k1 and t1.k1 = t2.k2";
+        explainString = UtFrameUtils.getSQLPlanOrErrorMsg(connectContext, queryStr);
+        Assert.assertTrue(!explainString.contains("BUCKET_SHFFULE"));
     }
 
     @Test

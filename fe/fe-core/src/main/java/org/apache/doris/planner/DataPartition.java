@@ -60,7 +60,7 @@ public class DataPartition {
         Preconditions.checkState(!exprs.isEmpty());
         Preconditions.checkState(
           type == TPartitionType.HASH_PARTITIONED || type == TPartitionType.RANGE_PARTITIONED
-                  || type == TPartitionType.HALF_SHFFULE_HASH_PARTITIONED);
+                  || type == TPartitionType.BUCKET_SHFFULE_HASH_PARTITIONED);
         this.type = type;
         this.partitionExprs = ImmutableList.copyOf(exprs);
     }

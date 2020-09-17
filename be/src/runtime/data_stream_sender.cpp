@@ -337,7 +337,7 @@ DataStreamSender::DataStreamSender(
             || sink.output_partition.type == TPartitionType::HASH_PARTITIONED
             || sink.output_partition.type == TPartitionType::RANDOM
             || sink.output_partition.type == TPartitionType::RANGE_PARTITIONED
-            || sink.output_partition.type == TPartitionType::HALF_SHFFULE_HASH_PARTITIONED);
+            || sink.output_partition.type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED);
     // TODO: use something like google3's linked_ptr here (scoped_ptr isn't copyable)
     std::map<int64_t, uint32_t> fragment_id_to_channel;
     for (int i = 0; i < destinations.size(); ++i) {
@@ -368,7 +368,7 @@ static bool compare_part_use_range(const PartitionInfo* v1, const PartitionInfo*
 Status DataStreamSender::init(const TDataSink& tsink) {
     RETURN_IF_ERROR(DataSink::init(tsink));
     const TDataStreamSink& t_stream_sink = tsink.stream_sink;
-    if (_part_type == TPartitionType::HASH_PARTITIONED || _part_type == TPartitionType::HALF_SHFFULE_HASH_PARTITIONED) {
+    if (_part_type == TPartitionType::HASH_PARTITIONED || _part_type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED) {
         RETURN_IF_ERROR(Expr::create_expr_trees(
                 _pool, t_stream_sink.output_partition.partition_exprs, &_partition_expr_ctxs));
     } else if (_part_type == TPartitionType::RANGE_PARTITIONED) {
@@ -417,7 +417,7 @@ Status DataStreamSender::prepare(RuntimeState* state) {
         // Randomize the order we open/transmit to channels to avoid thundering herd problems.
         srand(reinterpret_cast<uint64_t>(this));
         random_shuffle(_channels.begin(), _channels.end());
-    } else if (_part_type == TPartitionType::HASH_PARTITIONED || _part_type == TPartitionType::HALF_SHFFULE_HASH_PARTITIONED) {
+    } else if (_part_type == TPartitionType::HASH_PARTITIONED || _part_type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED) {
         RETURN_IF_ERROR(Expr::prepare(_partition_expr_ctxs, state, _row_desc, _expr_mem_tracker));
     } else {
         RETURN_IF_ERROR(Expr::prepare(_partition_expr_ctxs, state, _row_desc, _expr_mem_tracker));
@@ -497,7 +497,7 @@ Status DataStreamSender::send(RuntimeState* state, RowBatch* batch) {
             auto target_channel_id = hash_val % num_channels;
             RETURN_IF_ERROR(_channels[target_channel_id]->add_row(row));
         }
-    } else if (_part_type == TPartitionType::HALF_SHFFULE_HASH_PARTITIONED) {
+    } else if (_part_type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED) {
         // hash-partition batch's rows across channels
         int num_channels = _channel_shared_ptrs.size();
 

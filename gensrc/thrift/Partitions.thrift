@@ -31,13 +31,13 @@ enum TPartitionType {
   // (partition bounds overlap)
   HASH_PARTITIONED,
 
-  // unordered partition on a set of exprs
-  // (partition bounds overlap)
-  HALF_SHFFULE_HASH_PARTITIONED,
-
   // ordered partition on a list of exprs
   // (partition bounds don't overlap)
-  RANGE_PARTITIONED
+  RANGE_PARTITIONED,
+
+  // unordered partition on a set of exprs
+  // (only use in bucket shuffle join)
+  BUCKET_SHFFULE_HASH_PARTITIONED
 }
 
 enum TDistributionType {

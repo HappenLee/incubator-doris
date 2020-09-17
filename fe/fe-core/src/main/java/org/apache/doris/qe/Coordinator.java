@@ -784,7 +784,7 @@ public class Coordinator {
                         params.instanceExecParams.size() + destParams.perExchNumSenders.get(exchId.asInt()));
             }
 
-            if (isHalfShuffleJoin(destFragment.getFragmentId().asInt(), destFragment.getPlanRoot())) {
+            if (isBucketShuffleJoin(destFragment.getFragmentId().asInt(), destFragment.getPlanRoot())) {
                 int bucketSeq = 0;
                 TNetworkAddress dummyServer = new TNetworkAddress("0.0.0.0", 0);
                 while (bucketSeq < maxBucketNum) {
@@ -1004,7 +1004,7 @@ public class Coordinator {
 
             int parallelExecInstanceNum = fragment.getParallelExecNum();
             //for ColocateJoin fragment
-            if ((isColocateJoin(fragment.getPlanRoot()) || isHalfShuffleJoin(fragment.getFragmentId().asInt(), fragment.getPlanRoot())) && fragmentIdToSeqToAddressMap.containsKey(fragment.getFragmentId())
+            if ((isColocateJoin(fragment.getPlanRoot()) || isBucketShuffleJoin(fragment.getFragmentId().asInt(), fragment.getPlanRoot())) && fragmentIdToSeqToAddressMap.containsKey(fragment.getFragmentId())
                     && fragmentIdToSeqToAddressMap.get(fragment.getFragmentId()).size() > 0) {
                 Map<Integer, TNetworkAddress> bucketSeqToAddress = fragmentIdToSeqToAddressMap.get(fragment.getFragmentId());
                 BucketSeqToScanRange bucketSeqToScanRange = fragmentIdBucketSeqToScanRangeMap.get(fragment.getFragmentId());
@@ -1128,26 +1128,26 @@ public class Coordinator {
     }
 
     // One fragment could only have one HashJoinNode
-    private boolean isHalfShuffleJoin(int fragmentId, PlanNode node) {
+    private boolean isBucketShuffleJoin(int fragmentId, PlanNode node) {
         //cache the colocateFragmentIds
         if (fragmentId != node.getFragmentId().asInt()) {
             return false;
         }
 
-        if (halfShuffleFragmentIds.contains(fragmentId)) {
+        if (bucketShuffleFragmentIds.contains(fragmentId)) {
             return true;
         }
 
         if (node instanceof HashJoinNode) {
             HashJoinNode joinNode = (HashJoinNode) node;
-            if (joinNode.isHalfShuffle()) {
-                halfShuffleFragmentIds.add(joinNode.getFragmentId().asInt());
+            if (joinNode.isBucketShuffle()) {
+                bucketShuffleFragmentIds.add(joinNode.getFragmentId().asInt());
                 return true;
             }
         }
 
         for (PlanNode childNode : node.getChildren()) {
-            return isHalfShuffleJoin(fragmentId, childNode);
+            return isBucketShuffleJoin(fragmentId, childNode);
         }
 
         return false;
@@ -1201,7 +1201,7 @@ public class Coordinator {
 
             FragmentScanRangeAssignment assignment =
                     fragmentExecParamsMap.get(scanNode.getFragmentId()).scanRangeAssignment;
-            if (isColocateJoin(scanNode.getFragment().getPlanRoot()) || isHalfShuffleJoin(scanNode.getFragmentId().asInt(), scanNode.getFragment().getPlanRoot())) {
+            if (isColocateJoin(scanNode.getFragment().getPlanRoot()) || isBucketShuffleJoin(scanNode.getFragmentId().asInt(), scanNode.getFragment().getPlanRoot())) {
                 computeScanRangeAssignmentByColocate((OlapScanNode) scanNode, assignment);
             } else {
                 computeScanRangeAssignmentByScheduler(scanNode, locations, assignment);
@@ -1467,7 +1467,7 @@ public class Coordinator {
     private Set<Integer> colocateFragmentIds = new HashSet<>();
 
     private int maxBucketNum = -1;
-    private Set<Integer> halfShuffleFragmentIds = new HashSet<>();
+    private Set<Integer> bucketShuffleFragmentIds = new HashSet<>();
     private Map<PlanFragmentId, Map<Integer, TUniqueId>> fragmentIdsToBucketSeqInstanceIds = Maps.newHashMap();
     // record backend execute state
     // TODO(zhaochun): add profile information and others

@@ -385,17 +385,18 @@ public class DistributedPlanner {
             node.setColocate(false, reason.get(0));
         }
 
+        // bucket shuffle join is better than boradcast and shuffle join
+        // it can reduce the network cost of join, so doris chose it first
         List<Expr> rhsPartitionxprs = Lists.newArrayList();
-        if (canHalfShuffleJoin(node, leftChildFragment, reason, rhsPartitionxprs)) {
-            node.setHalfShuffle(true, "");
+        if (canBucketShuffleJoin(node, leftChildFragment, rhsPartitionxprs)) {
+            node.setDistributionMode(HashJoinNode.DistributionMode.BUCKET_SHUFFLE);
             DataPartition rhsJoinPartition =
-                    new DataPartition(TPartitionType.HALF_SHFFULE_HASH_PARTITIONED, rhsPartitionxprs);
+                    new DataPartition(TPartitionType.BUCKET_SHFFULE_HASH_PARTITIONED, rhsPartitionxprs);
             ExchangeNode rhsExchange =
                     new ExchangeNode(ctx_.getNextNodeId(), rightChildFragment.getPlanRoot(), false);
             rhsExchange.setNumInstances(rightChildFragment.getPlanRoot().getNumInstances());
             rhsExchange.init(ctx_.getRootAnalyzer());
 
-            //node.setDistributionMode(HashJoinNode.DistributionMode.PARTITIONED);
             node.setChild(0, leftChildFragment.getPlanRoot());
             node.setChild(1, rhsExchange);
             leftChildFragment.setPlanRoot(node);
@@ -405,9 +406,8 @@ public class DistributedPlanner {
 
             return leftChildFragment;
         } else {
-            node.setHalfShuffle(false, reason.get(reason.size() - 1));
+            node.setBucketShuffle(false);
         }
-
 
         if (doBroadcast) {
             node.setDistributionMode(HashJoinNode.DistributionMode.BROADCAST);
@@ -511,31 +511,28 @@ public class DistributedPlanner {
         return false;
     }
 
-    private boolean canHalfShuffleJoin(HashJoinNode node, PlanFragment leftChildFragment,
-                                    List<String> cannotReason, List<Expr> rhsHashExprs) {
+    private boolean canBucketShuffleJoin(HashJoinNode node, PlanFragment leftChildFragment,
+                                   List<Expr> rhsHashExprs) {
         if (!ConnectContext.get().getSessionVariable().isEnableBucketShuffleJoin()) {
-            cannotReason.add("Session disabled");
             return false;
         }
         PlanNode leftRoot = leftChildFragment.getPlanRoot();
 
         //leftRoot should be ScanNode or HashJoinNode, rightRoot should be ScanNode
         if (leftRoot instanceof OlapScanNode) {
-            return canHalfShuffleJoin(node, leftRoot, cannotReason, rhsHashExprs);
+            return canBucketShuffleJoin(node, leftRoot, rhsHashExprs);
         }
 
         return false;
     }
 
-    //the table must be colocate
-    //the colocate group must be stable
-    //the eqJoinConjuncts must contain the distributionColumns
-    private boolean canHalfShuffleJoin(HashJoinNode node, PlanNode leftRoot,
-                                    List<String> cannotReason, List<Expr> rhsJoinExprs) {
+    //the join expr must contian left table distribute column
+    private boolean canBucketShuffleJoin(HashJoinNode node, PlanNode leftRoot,
+                                    List<Expr> rhsJoinExprs) {
         OlapScanNode leftScanNode = ((OlapScanNode) leftRoot);
-        //1 the table must be colocate
+
+        //1 the left table must be only one partition
         if (leftScanNode.getSelectedPartitionIds().size() > 1) {
-            cannotReason.add("more than one partition");
             return false;
         }
 
@@ -561,11 +558,10 @@ public class DistributedPlanner {
                 rightExprs.add(rhsJoinExpr);
             }
 
-            //2 the join columns should contains all distribute columns to enable colocate join
+            //2 the join columns should contains all left table distribute columns to enable bucket shuffle join
             for (Column distributeColumn : leftDistributeColumns) {
                 int loc = leftJoinColumns.indexOf(distributeColumn);
                 if (loc == -1) {
-                    cannotReason.add("join column not match");
                     return false;
                 }
                 rhsJoinExprs.add(rightExprs.get(loc));
@@ -574,6 +570,7 @@ public class DistributedPlanner {
 
         return true;
     }
+
     //the table must be colocate
     //the colocate group must be stable
     //the eqJoinConjuncts must contain the distributionColumns
