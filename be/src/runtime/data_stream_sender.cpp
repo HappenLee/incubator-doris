@@ -338,8 +338,9 @@ DataStreamSender::DataStreamSender(
             || sink.output_partition.type == TPartitionType::RANDOM
             || sink.output_partition.type == TPartitionType::RANGE_PARTITIONED
             || sink.output_partition.type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED);
-    // TODO: use something like google3's linked_ptr here (scoped_ptr isn't copyable)
-    std::map<int64_t, uint32_t> fragment_id_to_channel;
+    // TODO: use something like google3's linked_ptr here (scoped_ptr isn't copyable
+
+    std::map<int64_t, Channel*> fragment_id_to_channel;
     for (int i = 0; i < destinations.size(); ++i) {
         // Select first dest as transfer chain.
         bool is_transfer_chain = (i == 0);
@@ -351,10 +352,10 @@ DataStreamSender::DataStreamSender(
                                 fragment_instance_id,
                                 sink.dest_node_id, per_channel_buffer_size,
                                 is_transfer_chain, send_query_statistics_with_every_batch));
-            fragment_id_to_channel.insert({fragment_instance_id.lo, _channel_shared_ptrs.size() - 1});
-            _channels.push_back(_channel_shared_ptrs[i].get());
+            fragment_id_to_channel.insert({fragment_instance_id.lo, _channel_shared_ptrs.back().get()});
+            _channels.push_back(_channel_shared_ptrs.back().get());
         } else {
-            _channel_shared_ptrs.emplace_back(_channel_shared_ptrs[fragment_id_to_channel[fragment_instance_id.lo]]);
+            _channels.emplace_back(fragment_id_to_channel[fragment_instance_id.lo]);
         }
     }
 }
@@ -499,7 +500,7 @@ Status DataStreamSender::send(RuntimeState* state, RowBatch* batch) {
         }
     } else if (_part_type == TPartitionType::BUCKET_SHFFULE_HASH_PARTITIONED) {
         // hash-partition batch's rows across channels
-        int num_channels = _channel_shared_ptrs.size();
+        int num_channels = _channels.size();
 
         for (int i = 0; i < batch->num_rows(); ++i) {
             TupleRow* row = batch->get_row(i);
@@ -517,7 +518,7 @@ Status DataStreamSender::send(RuntimeState* state, RowBatch* batch) {
                         partition_val, ctx->root()->type(), hash_val);
             }
             auto target_channel_id = hash_val % num_channels;
-            RETURN_IF_ERROR(_channel_shared_ptrs[target_channel_id]->add_row(row));
+            RETURN_IF_ERROR(_channels[target_channel_id]->add_row(row));
         }
     } else {
         // Range partition
