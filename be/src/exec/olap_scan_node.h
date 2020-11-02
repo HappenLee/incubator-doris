@@ -133,6 +133,9 @@ protected:
         VLOG(1) << s.str() << "\n]";
     }
 
+    bool is_key_column(const std::string& key_name);
+    void remove_idle_conjuncts(RuntimeState* state);
+
     Status start_scan(RuntimeState* state);
     Status normalize_conjuncts();
     Status build_olap_filters();
@@ -174,6 +177,8 @@ private:
     int _tuple_idx;
     // string slots
     std::vector<SlotDescriptor*> _string_slots;
+
+    std::set<uint32_t> _filter_conjuncts_index;
 
     bool _eos;
 

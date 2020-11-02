@@ -446,6 +446,9 @@ public class ColocateTableIndex implements Writable {
         writeLock();
         try {
             if (!group2BackendsPerBucketSeq.containsKey(info.getGroupId())) {
+                if (info.getBackendsPerBucketSeq().isEmpty()) {
+                    return;
+                }
                 Preconditions.checkState(!info.getBackendsPerBucketSeq().isEmpty());
                 group2BackendsPerBucketSeq.put(info.getGroupId(), info.getBackendsPerBucketSeq());
             }

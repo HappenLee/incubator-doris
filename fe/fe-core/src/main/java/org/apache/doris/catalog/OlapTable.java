@@ -879,6 +879,7 @@ public class OlapTable extends Table {
     @Override
     public TTableDescriptor toThrift() {
         TOlapTable tOlapTable = new TOlapTable(getName());
+
         TTableDescriptor tTableDescriptor = new TTableDescriptor(id, TTableType.OLAP_TABLE,
                 fullSchema.size(), 0, getName(), "");
         tTableDescriptor.setOlapTable(tOlapTable);

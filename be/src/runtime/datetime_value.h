@@ -278,6 +278,10 @@ public:
         return _second;
     }
 
+    bool is_pure_date() {
+        return _hour == 0 && _minute == 0 && _second == 0 && _microsecond == 0;
+    }
+    
     void cast_to_date() {
         _hour = 0;
         _minute = 0;
@@ -447,6 +451,10 @@ public:
         return _s_max_datetime_value;
     }
 
+    static DateTimeValue date_invalid_value() {
+        return _s_invalid_date_value;
+    }
+
     int64_t second_diff(const DateTimeValue& rhs) const {
         int day_diff = daynr() - rhs.daynr();
         int time_diff = (hour() * 3600 + minute() * 60 + second())
@@ -560,6 +568,7 @@ private:
 
     static DateTimeValue _s_min_datetime_value;
     static DateTimeValue _s_max_datetime_value;
+    static DateTimeValue _s_invalid_date_value;
     // RE2 obj is thread safe
     static RE2 time_zone_offset_format_reg;
 };
