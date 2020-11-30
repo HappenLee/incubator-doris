@@ -19,21 +19,11 @@
 #include <codecvt>
 #include <sqlext.h>
 
+#include "exprs/expr.h"
 #include "exec/odbc_scanner.h"
 #include "common/logging.h"
 #include "runtime/primitive_type.h"
-
-#define ODBC_DISPOSE(h, ht, x, op) { auto rc = x;\
-                                if (rc != SQL_SUCCESS && rc != SQL_SUCCESS_WITH_INFO) \
-                                { \
-                                    return error_status(op, handle_diagnostic_record(h, ht, rc)); \
-                                } \
-                                if (rc == SQL_ERROR) \
-                                { \
-                                    auto err_msg = std::string("Errro in") + std::string(op); \
-                                    return Status::InternalError(err_msg.c_str()); \
-                                }  \
-                            } \
+#include "util/types.h"
 
 static constexpr uint32_t SMALL_COLUMN_SIZE_BUFFER = 100;
 // Now we only treat HLL, CHAR, VARCHAR as big column
@@ -51,6 +41,7 @@ ODBCScanner::ODBCScanner(const ODBCScannerParam& param)
         : _connect_string(build_connect_string(param)),
           _type(param.type),
           _tuple_desc(param.tuple_desc),
+          _output_expr_ctxs(std::move(param.output_expr_ctxs)),
           _is_open(false),
           _field_num(0),
           _row_count(0),
@@ -192,6 +183,136 @@ Status ODBCScanner::get_next_row(bool* eos) {
     }
 
     *eos = true;
+    return Status::OK();
+}
+
+Status ODBCScanner::init_to_write() {
+    if (!_is_open) {
+        return Status::InternalError( "Init before open.");
+    }
+
+    // Allocate a statement handle
+    ODBC_DISPOSE(_dbc, SQL_HANDLE_DBC, SQLAllocHandle(SQL_HANDLE_STMT, _dbc, &_stmt), "alloc statement");
+
+    return Status::OK();
+}
+
+Status ODBCScanner::append(const std::string& table_name, doris::RowBatch *batch) {
+    if (batch == nullptr || batch->num_rows() == 0) {
+        return Status::OK();
+    }
+
+    int num_rows = batch->num_rows();
+    for (int i = 0; i < num_rows; ++i) {
+        RETURN_IF_ERROR(insert_row(table_name, batch->get_row(i)));
+    }
+
+    return Status::OK();
+}
+
+Status ODBCScanner::insert_row(const std::string& table_name, doris::TupleRow *row) {
+    std::stringstream ss;
+
+    // Construct Insert statement of mysql
+    ss << "INSERT INTO " << table_name << " VALUES (";
+    int num_columns = _output_expr_ctxs.size();
+    for (int i = 0; i < num_columns; ++i) {
+        if (i != 0) {
+            ss << ", ";
+        }
+        void* item = _output_expr_ctxs[i]->get_value(row);
+        if (item == nullptr) {
+            ss << "NULL";
+            continue;
+        }
+        switch (_output_expr_ctxs[i]->root()->type().type) {
+            case TYPE_BOOLEAN:
+            case TYPE_TINYINT:
+                ss << (int)*static_cast<int8_t*>(item);
+                break;
+            case TYPE_SMALLINT:
+                ss << *static_cast<int16_t*>(item);
+                break;
+            case TYPE_INT:
+                ss << *static_cast<int32_t*>(item);
+                break;
+            case TYPE_BIGINT:
+                ss << *static_cast<int64_t*>(item);
+                break;
+            case TYPE_FLOAT:
+                ss << *static_cast<float*>(item);
+                break;
+            case TYPE_DOUBLE:
+                ss << *static_cast<double*>(item);
+                break;
+            case TYPE_DATE:
+            case TYPE_DATETIME: {
+                char buf[64];
+                const DateTimeValue* time_val = (const DateTimeValue*)(item);
+                time_val->to_string(buf);
+                ss << "\'" << buf << "\'";
+                break;
+            }
+            case TYPE_VARCHAR:
+            case TYPE_CHAR: {
+                const StringValue* string_val = (const StringValue*)(item);
+
+                if (string_val->ptr == NULL) {
+                    if (string_val->len == 0) {
+                        ss << "\'\'";
+                    } else {
+                        ss << "NULL";
+                    }
+                } else {
+                    ss << "\'";
+                    for (int j = 0; j < string_val->len ; ++j) {
+                        ss << string_val->ptr[j];
+                    }
+                    ss << "\'";
+                }
+                break;
+            }
+            case TYPE_DECIMAL: {
+                const DecimalValue* decimal_val = reinterpret_cast<const DecimalValue*>(item);
+                std::string decimal_str;
+                int output_scale = _output_expr_ctxs[i]->root()->output_scale();
+
+                if (output_scale > 0 && output_scale <= 30) {
+                    decimal_str = decimal_val->to_string(output_scale);
+                } else {
+                    decimal_str = decimal_val->to_string();
+                }
+                ss << decimal_str;
+                break;
+            }
+            case TYPE_DECIMALV2: {
+                const DecimalV2Value decimal_val(reinterpret_cast<const PackedInt128*>(item)->value);
+                std::string decimal_str;
+                int output_scale = _output_expr_ctxs[i]->root()->output_scale();
+
+                if (output_scale > 0 && output_scale <= 30) {
+                    decimal_str = decimal_val.to_string(output_scale);
+                } else {
+                    decimal_str = decimal_val.to_string();
+                }
+                ss << decimal_str;
+                break;
+            }
+
+            default: {
+                std::stringstream err_ss;
+                err_ss << "can't convert this type to mysql type. type = " <<
+                       _output_expr_ctxs[i]->root()->type();
+                return Status::InternalError(err_ss.str());
+            }
+        }
+    }
+    ss << ")";
+
+    // Translate utf8 string to utf16 to use unicode codeing
+    auto insert_stmt = utf8_to_wstring(ss.str());
+    ODBC_DISPOSE(_stmt, SQL_HANDLE_STMT, SQLExecDirectW(_stmt, (SQLWCHAR*)(insert_stmt.c_str()), SQL_NTS), ss.str().c_str());
+
     return Status::OK();
 }
 

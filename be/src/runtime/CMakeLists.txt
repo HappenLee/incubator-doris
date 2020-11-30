@@ -103,6 +103,7 @@ set(RUNTIME_FILES
     memory_scratch_sink.cpp
     external_scan_context_mgr.cpp
     file_result_writer.cpp
+    odbc_table_sink.cpp
     mysql_result_writer.cpp
     memory/system_allocator.cpp
     memory/chunk_allocator.cpp

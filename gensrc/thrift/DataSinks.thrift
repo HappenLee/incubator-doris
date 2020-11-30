@@ -31,7 +31,8 @@ enum TDataSinkType {
     MYSQL_TABLE_SINK,
     EXPORT_SINK,
     OLAP_TABLE_SINK,
-    MEMORY_SCRATCH_SINK
+    MEMORY_SCRATCH_SINK,
+    ODBC_TABLE_SINK
 }
 
 enum TResultSinkType {
@@ -80,6 +81,17 @@ struct TMysqlTableSink {
     4: required string passwd
     5: required string db
     6: required string table
+}
+
+struct TOdbcTableSink {
+    1: optional string host
+    2: optional string port
+    3: optional string user
+    4: optional string passwd
+    5: optional string db
+    6: optional string table
+    7: optional string driver
+    8: optional Types.TOdbcTableType type
 }
 
 // Following is used to split data read from 
@@ -133,5 +145,6 @@ struct TDataSink {
   6: optional TExportSink export_sink
   7: optional TOlapTableSink olap_table_sink
   8: optional TMemoryScratchSink memory_scratch_sink
+  9: optional TOdbcTableSink odbc_table_sink
 }
 

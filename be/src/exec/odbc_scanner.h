@@ -25,9 +25,23 @@
 #include <string>
 #include <vector>
 
+#include "exprs/expr_context.h"
+#include "runtime/row_batch.h"
 #include "common/status.h"
 #include "gen_cpp/Types_types.h"
 #include "runtime/descriptors.h"
+
+#define ODBC_DISPOSE(h, ht, x, op) { auto rc = x;\
+                                if (rc != SQL_SUCCESS && rc != SQL_SUCCESS_WITH_INFO) \
+                                { \
+                                    return error_status(op, handle_diagnostic_record(h, ht, rc)); \
+                                } \
+                                if (rc == SQL_ERROR) \
+                                { \
+                                    auto err_msg = std::string("Errro in") + std::string(op); \
+                                    return Status::InternalError(err_msg.c_str()); \
+                                }  \
+                            } \
 
 namespace doris {
 
@@ -39,9 +53,12 @@ struct ODBCScannerParam {
     std::string db;
     std::string drivier;
     std::string charest = "utf8";
-
     TOdbcTableType::type type;
+
+    // only use in read
     const TupleDescriptor* tuple_desc;
+    // only use in write
+    std::vector<ExprContext*> output_expr_ctxs;
 };
 
 // Because the DataBinding have the mem alloc, so
@@ -67,6 +84,10 @@ public:
 
     Status open();
 
+    Status init_to_write();
+
+    Status append(const std::string& table_name, RowBatch* batch);
+
     Status query(const std::string& query);
 
     // query for DORIS
@@ -80,6 +101,8 @@ public:
     }
 
 private:
+    Status insert_row(const string& table_name, TupleRow* row);
+
     static std::string build_connect_string(const ODBCScannerParam& param);
 
     static Status error_status(const std::string& prefix, const std::string& error_msg);
@@ -91,7 +114,10 @@ private:
     std::string _connect_string;
     std::string _sql_str;
     TOdbcTableType::type _type;
+    // only use in read
     const TupleDescriptor* _tuple_desc;
+    // only use in write
+    const std::vector<ExprContext*> _output_expr_ctxs;
 
     bool _is_open;
     SQLSMALLINT _field_num;

@@ -30,6 +30,7 @@
 #include "runtime/result_sink.h"
 #include "runtime/memory_scratch_sink.h"
 #include "runtime/mysql_table_sink.h"
+#include "runtime/odbc_table_sink.h"
 #include "runtime/data_spliter.h"
 #include "runtime/export_sink.h"
 #include "runtime/runtime_state.h"
@@ -95,6 +96,17 @@ Status DataSink::create_data_sink(
 #endif
     }
 
+    case TDataSinkType::ODBC_TABLE_SINK: {
+        if (!thrift_sink.__isset.odbc_table_sink) {
+            return Status::InternalError("Missing data odbc sink.");
+        }
+
+        // TODO: figure out good buffer size based on size of output row
+        OdbcTableSink* odbc_tbl_sink = new OdbcTableSink(pool,
+                row_desc, output_exprs);
+        sink->reset(odbc_tbl_sink);
+        break;
+    }
     case TDataSinkType::DATA_SPLIT_SINK: {
         if (!thrift_sink.__isset.split_sink) {
             return Status::InternalError("Missing data split buffer sink.");
