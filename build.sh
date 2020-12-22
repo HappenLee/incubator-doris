@@ -41,7 +41,8 @@ if [[ ! -f ${DORIS_THIRDPARTY}/installed/lib/libs2.a ]]; then
     ${DORIS_THIRDPARTY}/build-thirdparty.sh
 fi
 
-PARALLEL=$[$(nproc)/4+1]
+#PARALLEL=$[$(nproc)/4+1]
+PARALLEL=$[$(nproc)+1]
 
 # Check args
 usage() {
@@ -75,6 +76,7 @@ OPTS=$(getopt \
   -l 'spark-dpp' \
   -l 'clean' \
   -l 'help' \
+  -l 'ninja' \
   -- "$@")
 
 if [ $? != 0 ] ; then
@@ -113,6 +115,7 @@ else
             --spark-dpp) BUILD_SPARK_DPP=1 ; shift ;;
             --clean) CLEAN=1 ; shift ;;
             --ut) RUN_UT=1   ; shift ;;
+            --ninja) USE_NINJA=1 ; shift ;;
             -h) HELP=1; shift ;;
             --help) HELP=1; shift ;;
             --) shift ;  break ;;
@@ -145,6 +148,7 @@ echo "Get params:
     BUILD_SPARK_DPP     -- $BUILD_SPARK_DPP
     CLEAN               -- $CLEAN
     RUN_UT              -- $RUN_UT
+    USE_NINJA           -- $USE_NINJA
     WITH_MYSQL          -- $WITH_MYSQL
     WITH_LZO            -- $WITH_LZO
 "
@@ -173,7 +177,7 @@ if [ ${BUILD_BE} -eq 1 ] ; then
     cd ${CMAKE_BUILD_DIR}
     GENERATOR="Unix Makefiles"
     BUILD_SYSTEM="make"
-    if ninja --version 2>/dev/null; then
+    if [ ${USE_NINJA} -eq 1 ]; then
         GENERATOR="Ninja"
         BUILD_SYSTEM="ninja"
     fi
