@@ -156,7 +156,7 @@ public:
             *(col_data + i) = i;                                                                  \
         }                                                                                         \
                                                                                                   \
-        std::set<TYPE> values;                                                                    \
+        std::unordered_set<TYPE> values;                                                                    \
         values.insert(4);                                                                         \
         values.insert(5);                                                                         \
         values.insert(6);                                                                         \
@@ -203,7 +203,7 @@ TEST_IN_LIST_PREDICATE(int128_t, LARGEINT, "LARGEINT")
         int size = 10;                                                                            \
         Schema schema(tablet_schema);                                                             \
         RowBlockV2 block(schema, size);                                                           \
-        std::set<TYPE> values;                                                                    \
+        std::unordered_set<TYPE> values;                                                                    \
         values.insert(4);                                                                         \
         values.insert(5);                                                                         \
         values.insert(6);                                                                         \
@@ -268,7 +268,7 @@ TEST_F(TestInListPredicate, FLOAT_COLUMN) {
     for (int i = 0; i < tablet_schema.num_columns(); ++i) {
         return_columns.push_back(i);
     }
-    std::set<float> values;
+    std::unordered_set<float> values;
     values.insert(4.1);
     values.insert(5.1);
     values.insert(6.1);
@@ -352,7 +352,7 @@ TEST_F(TestInListPredicate, DOUBLE_COLUMN) {
     for (int i = 0; i < tablet_schema.num_columns(); ++i) {
         return_columns.push_back(i);
     }
-    std::set<double> values;
+    std::unordered_set<double> values;
     values.insert(4.1);
     values.insert(5.1);
     values.insert(6.1);
