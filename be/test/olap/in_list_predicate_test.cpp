@@ -437,7 +437,7 @@ TEST_F(TestInListPredicate, DECIMAL_COLUMN) {
     for (int i = 0; i < tablet_schema.num_columns(); ++i) {
         return_columns.push_back(i);
     }
-    std::set<decimal12_t> values;
+    std::unordered_set<decimal12_t> values;
 
     decimal12_t value1(4, 4);
     values.insert(value1);
@@ -530,7 +530,7 @@ TEST_F(TestInListPredicate, CHAR_COLUMN) {
     for (int i = 0; i < tablet_schema.num_columns(); ++i) {
         return_columns.push_back(i);
     }
-    std::set<StringValue> values;
+    std::unordered_set<StringValue> values;
     StringValue value1;
     const char* value1_buffer = "aaaaa";
     value1.ptr = const_cast<char*>(value1_buffer);
@@ -658,7 +658,7 @@ TEST_F(TestInListPredicate, VARCHAR_COLUMN) {
     for (int i = 0; i < tablet_schema.num_columns(); ++i) {
         return_columns.push_back(i);
     }
-    std::set<StringValue> values;
+    std::unordered_set<StringValue> values;
     StringValue value1;
     const char* value1_buffer = "a";
     value1.ptr = const_cast<char*>(value1_buffer);
@@ -783,7 +783,7 @@ TEST_F(TestInListPredicate, DATE_COLUMN) {
     for (int i = 0; i < tablet_schema.num_columns(); ++i) {
         return_columns.push_back(i);
     }
-    std::set<uint24_t> values;
+    std::unordered_set<uint24_t> values;
     uint24_t value1 = datetime::timestamp_from_date("2017-09-09");
     values.insert(value1);
 
@@ -892,7 +892,7 @@ TEST_F(TestInListPredicate, DATETIME_COLUMN) {
     for (int i = 0; i < tablet_schema.num_columns(); ++i) {
         return_columns.push_back(i);
     }
-    std::set<uint64_t> values;
+    std::unordered_set<uint64_t> values;
     uint64_t value1 = datetime::timestamp_from_datetime("2017-09-09 00:00:01");
     values.insert(value1);
 
