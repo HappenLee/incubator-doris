@@ -183,14 +183,8 @@ Status OlapScanner::_init_params(const std::vector<OlapScanRange*>& key_ranges,
             }
         }
     }
-
-    // use _params.return_columns, because reader use this to merge sort
-    OLAPStatus res = _read_row_cursor.init(_tablet->tablet_schema(), _params.return_columns);
-    if (res != OLAP_SUCCESS) {
-        OLAP_LOG_WARNING("fail to init row cursor.[res=%d]", res);
-        return Status::InternalError("failed to initialize storage read row cursor");
-    }
-    _read_row_cursor.allocate_memory_for_string_type(_tablet->tablet_schema());
+    _params.query_slots = std::move(_query_slots);
+    _params.return_columns_of_tuple = std::move(_return_columns);
 
     // If a agg node is this scan node direct parent
     // we will not call agg object finalize method in scan node,
@@ -219,6 +213,7 @@ Status OlapScanner::_init_return_columns() {
         _return_columns.push_back(index);
         _query_slots.push_back(slot);
     }
+
     // expand the sequence column
     if (_tablet->tablet_schema().has_sequence_col()) {
         bool has_replace_col = false;
@@ -260,7 +255,7 @@ Status OlapScanner::get_batch(RuntimeState* state, RowBatch* batch, bool* eof) {
                 break;
             }
             // Read one row from reader
-            auto res = _reader->next_row_with_aggregation(&_read_row_cursor, mem_pool.get(),
+            auto res = _reader->next_tuple_with_aggregation(tuple, mem_pool.get(),
                                                           batch->agg_object_pool(), eof);
             if (res != OLAP_SUCCESS) {
                 std::stringstream ss;
@@ -276,7 +271,6 @@ Status OlapScanner::get_batch(RuntimeState* state, RowBatch* batch, bool* eof) {
 
             _num_rows_read++;
 
-            _convert_row_to_tuple(tuple);
             if (VLOG_ROW_IS_ON) {
                 VLOG_ROW << "OlapScanner input row: " << Tuple::to_string(tuple, *_tuple_desc);
             }
@@ -370,83 +364,6 @@ Status OlapScanner::get_batch(RuntimeState* state, RowBatch* batch, bool* eof) {
     }
 
     return Status::OK();
-}
-
-void OlapScanner::_convert_row_to_tuple(Tuple* tuple) {
-    size_t slots_size = _query_slots.size();
-    for (int i = 0; i < slots_size; ++i) {
-        SlotDescriptor* slot_desc = _query_slots[i];
-        auto cid = _return_columns[i];
-        if (_read_row_cursor.is_null(cid)) {
-            tuple->set_null(slot_desc->null_indicator_offset());
-            continue;
-        }
-        char* ptr = (char*)_read_row_cursor.cell_ptr(cid);
-        size_t len = _read_row_cursor.column_size(cid);
-        switch (slot_desc->type().type) {
-        case TYPE_CHAR: {
-            Slice* slice = reinterpret_cast<Slice*>(ptr);
-            StringValue* slot = tuple->get_string_slot(slot_desc->tuple_offset());
-            slot->ptr = slice->data;
-            slot->len = strnlen(slot->ptr, slice->size);
-            break;
-        }
-        case TYPE_VARCHAR:
-        case TYPE_OBJECT:
-        case TYPE_HLL: {
-            Slice* slice = reinterpret_cast<Slice*>(ptr);
-            StringValue* slot = tuple->get_string_slot(slot_desc->tuple_offset());
-            slot->ptr = slice->data;
-            slot->len = slice->size;
-            break;
-        }
-        case TYPE_DECIMAL: {
-            DecimalValue* slot = tuple->get_decimal_slot(slot_desc->tuple_offset());
-
-            // TODO(lingbin): should remove this assign, use set member function
-            int64_t int_value = *(int64_t*)(ptr);
-            int32_t frac_value = *(int32_t*)(ptr + sizeof(int64_t));
-            *slot = DecimalValue(int_value, frac_value);
-            break;
-        }
-        case TYPE_DECIMALV2: {
-            DecimalV2Value* slot = tuple->get_decimalv2_slot(slot_desc->tuple_offset());
-
-            int64_t int_value = *(int64_t*)(ptr);
-            int32_t frac_value = *(int32_t*)(ptr + sizeof(int64_t));
-            if (!slot->from_olap_decimal(int_value, frac_value)) {
-                tuple->set_null(slot_desc->null_indicator_offset());
-            }
-            break;
-        }
-        case TYPE_DATETIME: {
-            DateTimeValue* slot = tuple->get_datetime_slot(slot_desc->tuple_offset());
-            uint64_t value = *reinterpret_cast<uint64_t*>(ptr);
-            if (!slot->from_olap_datetime(value)) {
-                tuple->set_null(slot_desc->null_indicator_offset());
-            }
-            break;
-        }
-        case TYPE_DATE: {
-            DateTimeValue* slot = tuple->get_datetime_slot(slot_desc->tuple_offset());
-            uint64_t value = 0;
-            value = *(unsigned char*)(ptr + 2);
-            value <<= 8;
-            value |= *(unsigned char*)(ptr + 1);
-            value <<= 8;
-            value |= *(unsigned char*)(ptr);
-            if (!slot->from_olap_date(value)) {
-                tuple->set_null(slot_desc->null_indicator_offset());
-            }
-            break;
-        }
-        default: {
-            void* slot = tuple->get_slot(slot_desc->tuple_offset());
-            memory_copy(slot, ptr, len);
-            break;
-        }
-        }
-    }
 }
 
 void OlapScanner::update_counter() {

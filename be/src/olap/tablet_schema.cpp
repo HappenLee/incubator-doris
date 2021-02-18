@@ -15,6 +15,7 @@
 // specific language governing permissions and limitations
 // under the License.
 
+#include <exec/schema_scanner.h>
 #include "olap/tablet_schema.h"
 
 #include "tablet_meta.h"
@@ -436,6 +437,24 @@ const std::vector<TabletColumn>& TabletSchema::columns() const {
 const TabletColumn& TabletSchema::column(size_t ordinal) const {
     DCHECK(ordinal < _num_columns) << "ordinal:" << ordinal << ", _num_columns:" << _num_columns;
     return _cols[ordinal];
+}
+
+// use the SchemaScanner to build the TupleDescriptor from the tablet schema.
+// because of ObjectPool, we no need to worry the problem of mem leak
+TupleDescriptor* TabletSchema::get_tuple_desc(ObjectPool* pool) const {
+    SchemaScanner::ColumnDesc column_descs[_cols.size()];
+    for (int i = 0; i < _cols.size() ; ++i) {
+        const auto& column = _cols[i];
+        column_descs[i].name = column.name().c_str();
+        column_descs[i].is_null = column.is_nullable();
+        column_descs[i].type = convert_filed_type_to_primitive_type(column.type());
+        column_descs[i].size = get_slot_size(column_descs[i].type);
+    }
+
+    SchemaScanner temp(column_descs, _cols.size());
+    temp.create_tuple_desc(pool);
+
+    return temp._tuple_desc;
 }
 
 void TabletSchema::init_field_index_for_test() {

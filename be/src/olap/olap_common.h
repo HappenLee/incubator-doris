@@ -33,6 +33,7 @@
 
 #include "gen_cpp/Types_types.h"
 #include "olap/olap_define.h"
+#include "runtime/primitive_type.h"
 #include "util/hash_util.hpp"
 #include "util/uid_util.h"
 
@@ -143,6 +144,69 @@ enum FieldType {
     OLAP_FIELD_TYPE_BOOL = 24,
     OLAP_FIELD_TYPE_OBJECT = 25
 };
+
+inline PrimitiveType convert_filed_type_to_primitive_type(FieldType type) {
+    PrimitiveType result_type;
+    switch (type) {
+        case OLAP_FIELD_TYPE_BOOL:
+            result_type = TYPE_BOOLEAN;
+            break;
+        case OLAP_FIELD_TYPE_TINYINT:
+            result_type = TYPE_TINYINT;
+            break;
+        case OLAP_FIELD_TYPE_SMALLINT:
+            result_type = TYPE_SMALLINT;
+            break;
+        case OLAP_FIELD_TYPE_INT:
+            result_type = TYPE_INT;
+            break;
+        case OLAP_FIELD_TYPE_BIGINT:
+            result_type = TYPE_BIGINT;
+            break;
+        case OLAP_FIELD_TYPE_LARGEINT:
+            result_type = TYPE_LARGEINT;
+            break;
+        case OLAP_FIELD_TYPE_FLOAT:
+            result_type = TYPE_FLOAT;
+            break;
+        case OLAP_FIELD_TYPE_DOUBLE:
+            result_type = TYPE_DOUBLE;
+            break;
+        case OLAP_FIELD_TYPE_CHAR:
+            result_type = TYPE_CHAR;
+            break;
+        case OLAP_FIELD_TYPE_VARCHAR:
+            result_type = TYPE_VARCHAR;
+            break;
+        case OLAP_FIELD_TYPE_DATE:
+            result_type = TYPE_DATE;
+            break;
+        case OLAP_FIELD_TYPE_DATETIME:
+            result_type = TYPE_DATETIME;
+            break;
+        case OLAP_FIELD_TYPE_DECIMAL:
+            result_type = TYPE_DECIMALV2;
+            break;
+        case OLAP_FIELD_TYPE_HLL:
+            result_type = TYPE_HLL;
+            break;
+        case OLAP_FIELD_TYPE_STRUCT:
+            result_type = TYPE_STRUCT;
+            break;
+        case OLAP_FIELD_TYPE_ARRAY:
+            result_type = TYPE_ARRAY;
+            break;
+        case OLAP_FIELD_TYPE_MAP:
+            result_type = TYPE_MAP;
+            break;
+        case OLAP_FIELD_TYPE_OBJECT:
+            result_type = TYPE_OBJECT;
+            break;
+        default:
+            result_type = INVALID_TYPE;
+    }
+    return result_type;
+}
 
 // 定义Field支持的所有聚集方法
 // 注意，实际中并非所有的类型都能使用以下所有的聚集方法

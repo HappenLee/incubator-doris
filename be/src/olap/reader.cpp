@@ -101,7 +101,7 @@ Reader::~Reader() {
     close();
 }
 
-OLAPStatus Reader::init(const ReaderParams& read_params) {
+OLAPStatus Reader::init(ReaderParams& read_params) {
     _tracker.reset(new MemTracker(-1, read_params.tablet->full_name()));
     _predicate_mem_pool.reset(new MemPool(_tracker.get()));
 
@@ -144,25 +144,26 @@ OLAPStatus Reader::init(const ReaderParams& read_params) {
             }
         }
     }
+
     if (!has_overlapping && nonoverlapping_count == 1 && !has_delete_rowset) {
-        _next_row_func = _tablet->keys_type() == AGG_KEYS ? &Reader::_direct_agg_key_next_row
-                                                          : &Reader::_direct_next_row;
+        _next_tuple_func = _tablet->keys_type() == AGG_KEYS ? &Reader::_direct_agg_key_next_tuple
+                                                          : &Reader::_direct_next_tuple;
     } else {
         switch (_tablet->keys_type()) {
         case KeysType::DUP_KEYS:
-            _next_row_func = &Reader::_direct_next_row;
+            _next_tuple_func = &Reader::_direct_next_tuple;
             break;
         case KeysType::UNIQUE_KEYS:
-            _next_row_func = &Reader::_unique_key_next_row;
+            _next_tuple_func = &Reader::_unique_key_next_tuple;
             break;
         case KeysType::AGG_KEYS:
-            _next_row_func = &Reader::_agg_key_next_row;
+            _next_tuple_func = &Reader::_agg_key_next_tuple;
             break;
         default:
             break;
         }
     }
-    DCHECK(_next_row_func != nullptr) << "No next row function for type:" << _tablet->keys_type();
+    DCHECK(_next_tuple_func != nullptr) << "No next row function for type:" << _tablet->keys_type();
 
     return OLAP_SUCCESS;
 }
@@ -180,6 +181,21 @@ OLAPStatus Reader::_direct_next_row(RowCursor* row_cursor, MemPool* mem_pool, Ob
     }
     return OLAP_SUCCESS;
 }
+
+OLAPStatus Reader::_direct_next_tuple(Tuple* tuple, MemPool* mem_pool, ObjectPool* agg_pool,
+                                    bool* eof) {
+    if (UNLIKELY(_next_key == nullptr)) {
+        *eof = true;
+        return OLAP_SUCCESS;
+    }
+    _convert_row_to_tuple(tuple, *_next_key);
+    auto res = _collect_iter->next(&_next_key, &_next_delete_flag);
+    if (UNLIKELY(res != OLAP_SUCCESS && res != OLAP_ERR_DATA_EOF)) {
+        return res;
+    }
+    return OLAP_SUCCESS;
+}
+
 OLAPStatus Reader::_direct_agg_key_next_row(RowCursor* row_cursor, MemPool* mem_pool,
                                             ObjectPool* agg_pool, bool* eof) {
     if (UNLIKELY(_next_key == nullptr)) {
@@ -195,6 +211,15 @@ OLAPStatus Reader::_direct_agg_key_next_row(RowCursor* row_cursor, MemPool* mem_
         agg_finalize_row(_value_cids, row_cursor, mem_pool);
     }
     return OLAP_SUCCESS;
+}
+
+OLAPStatus Reader::_direct_agg_key_next_tuple(Tuple* tuple, MemPool* mem_pool,
+                                              ObjectPool* agg_pool, bool* eof) {
+    auto res = _direct_agg_key_next_row(&_read_row_cursor, mem_pool, agg_pool, eof);
+    if (LIKELY(res == OLAP_SUCCESS) && !(*eof)) {
+        _convert_row_to_tuple(tuple, _read_row_cursor);
+    }
+    return res;
 }
 
 OLAPStatus Reader::_agg_key_next_row(RowCursor* row_cursor, MemPool* mem_pool, ObjectPool* agg_pool,
@@ -234,6 +259,15 @@ OLAPStatus Reader::_agg_key_next_row(RowCursor* row_cursor, MemPool* mem_pool, O
     }
 
     return OLAP_SUCCESS;
+}
+
+OLAPStatus Reader::_agg_key_next_tuple(Tuple* tuple, MemPool* mem_pool, ObjectPool* agg_pool,
+                                     bool* eof) {
+    auto res = _agg_key_next_row(&_read_row_cursor, mem_pool, agg_pool, eof);
+    if (LIKELY(res == OLAP_SUCCESS) && !(*eof)) {
+        _convert_row_to_tuple(tuple, _read_row_cursor);
+    }
+    return res;
 }
 
 OLAPStatus Reader::_unique_key_next_row(RowCursor* row_cursor, MemPool* mem_pool,
@@ -285,6 +319,24 @@ OLAPStatus Reader::_unique_key_next_row(RowCursor* row_cursor, MemPool* mem_pool
         _stats.rows_del_filtered++;
     } while (cur_delete_flag);
     _merged_rows += merged_count;
+    return OLAP_SUCCESS;
+}
+
+OLAPStatus Reader::_unique_key_next_tuple(Tuple* tuple, MemPool* mem_pool,
+                                        ObjectPool* agg_pool, bool* eof) {
+    do {
+        auto res = _unique_key_next_row(&_read_row_cursor, mem_pool, agg_pool, eof);
+        if (UNLIKELY(res != OLAP_SUCCESS) || (*eof)) {
+            return res;
+        // TODO: Delete data in here, not in olap scanner to call expr.
+//        } else if (_read_row_cursor.is_delete()) {
+//            continue;
+        } else {
+            break;
+        }
+    } while (true);
+
+    _convert_row_to_tuple(tuple, _read_row_cursor);
     return OLAP_SUCCESS;
 }
 
@@ -404,14 +456,16 @@ OLAPStatus Reader::_capture_rs_readers(const ReaderParams& read_params) {
     }
     _collect_iter->build_heap();
     _next_key = _collect_iter->current_row(&_next_delete_flag);
+
     return OLAP_SUCCESS;
 }
 
-OLAPStatus Reader::_init_params(const ReaderParams& read_params) {
+OLAPStatus Reader::_init_params(ReaderParams& read_params) {
     read_params.check_validation();
 
     _aggregation = read_params.aggregation;
     _need_agg_finalize = read_params.need_agg_finalize;
+    _need_full_char = read_params.need_full_char;
     _reader_type = read_params.reader_type;
     _tablet = read_params.tablet;
 
@@ -437,6 +491,13 @@ OLAPStatus Reader::_init_params(const ReaderParams& read_params) {
     }
 
     _init_seek_columns();
+    // use _params.return_columns, because reader use this to merge sort
+    res = _read_row_cursor.init(_tablet->tablet_schema(), _return_columns);
+    if (res != OLAP_SUCCESS) {
+        OLAP_LOG_WARNING("fail to init row cursor.[res=%d]", res);
+        return res;
+    }
+    _read_row_cursor.allocate_memory_for_string_type(_tablet->tablet_schema());
 
     _collect_iter->init(this);
 
@@ -451,6 +512,8 @@ OLAPStatus Reader::_init_params(const ReaderParams& read_params) {
             }
         }
     }
+    _query_slots = std::move(read_params.query_slots);
+    _return_columns_of_tuple = std::move(read_params.return_columns_of_tuple);
 
     return res;
 }
@@ -700,7 +763,6 @@ COMPARISON_PREDICATE_CONDITION_VALUE(gt, GreaterPredicate)
 COMPARISON_PREDICATE_CONDITION_VALUE(ge, GreaterEqualPredicate)
 
 ColumnPredicate* Reader::_parse_to_predicate(const TCondition& condition, bool opposite) const {
-    // TODO: not equal and not in predicate is not pushed down
     int32_t index = _tablet->field_index(condition.column_name);
     if (index < 0) {
         return nullptr;
@@ -950,6 +1012,86 @@ OLAPStatus Reader::_init_delete_condition(const ReaderParams& read_params) {
         _filter_delete = true;
     }
     return ret;
+}
+
+void Reader::_convert_row_to_tuple(Tuple* tuple, const RowCursor& read_row_cursor) {
+    size_t slots_size = _query_slots.size();
+    for (int i = 0; i < slots_size; ++i) {
+        SlotDescriptor* slot_desc = _query_slots[i];
+        auto cid = _return_columns_of_tuple[i];
+        if (read_row_cursor.is_null(cid)) {
+            tuple->set_null(slot_desc->null_indicator_offset());
+            continue;
+        } else {
+            tuple->set_not_null(slot_desc->null_indicator_offset());
+        }
+
+        char* ptr = (char*)read_row_cursor.cell_ptr(cid);
+        size_t len = read_row_cursor.column_size(cid);
+        switch (slot_desc->type().type) {
+            case TYPE_CHAR: {
+                Slice* slice = reinterpret_cast<Slice*>(ptr);
+                StringValue* slot = tuple->get_string_slot(slot_desc->tuple_offset());
+                slot->ptr = slice->data;
+                slot->len = _need_full_char ? slice->size : strnlen(slot->ptr, slice->size);
+                break;
+            }
+            case TYPE_VARCHAR:
+            case TYPE_OBJECT:
+            case TYPE_HLL: {
+                Slice* slice = reinterpret_cast<Slice*>(ptr);
+                StringValue* slot = tuple->get_string_slot(slot_desc->tuple_offset());
+                slot->ptr = slice->data;
+                slot->len = slice->size;
+                break;
+            }
+            case TYPE_DECIMAL: {
+                DecimalValue* slot = tuple->get_decimal_slot(slot_desc->tuple_offset());
+
+                // TODO(lingbin): should remove this assign, use set member function
+                int64_t int_value = *(int64_t*)(ptr);
+                int32_t frac_value = *(int32_t*)(ptr + sizeof(int64_t));
+                *slot = DecimalValue(int_value, frac_value);
+                break;
+            }
+            case TYPE_DECIMALV2: {
+                DecimalV2Value* slot = tuple->get_decimalv2_slot(slot_desc->tuple_offset());
+
+                int64_t int_value = *(int64_t*)(ptr);
+                int32_t frac_value = *(int32_t*)(ptr + sizeof(int64_t));
+                if (!slot->from_olap_decimal(int_value, frac_value)) {
+                    tuple->set_null(slot_desc->null_indicator_offset());
+                }
+                break;
+            }
+            case TYPE_DATETIME: {
+                DateTimeValue* slot = tuple->get_datetime_slot(slot_desc->tuple_offset());
+                uint64_t value = *reinterpret_cast<uint64_t*>(ptr);
+                if (!slot->from_olap_datetime(value)) {
+                    tuple->set_null(slot_desc->null_indicator_offset());
+                }
+                break;
+            }
+            case TYPE_DATE: {
+                DateTimeValue* slot = tuple->get_datetime_slot(slot_desc->tuple_offset());
+                uint64_t value = 0;
+                value = *(unsigned char*)(ptr + 2);
+                value <<= 8;
+                value |= *(unsigned char*)(ptr + 1);
+                value <<= 8;
+                value |= *(unsigned char*)(ptr);
+                if (!slot->from_olap_date(value)) {
+                    tuple->set_null(slot_desc->null_indicator_offset());
+                }
+                break;
+            }
+            default: {
+                void* slot = tuple->get_slot(slot_desc->tuple_offset());
+                memory_copy(slot, ptr, len);
+                break;
+            }
+        }
+    }
 }
 
 } // namespace doris

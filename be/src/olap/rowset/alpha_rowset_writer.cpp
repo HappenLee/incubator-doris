@@ -92,6 +92,20 @@ OLAPStatus AlphaRowsetWriter::_add_row(const RowType& row) {
 template OLAPStatus AlphaRowsetWriter::_add_row(const RowCursor& row);
 template OLAPStatus AlphaRowsetWriter::_add_row(const ContiguousRow& row);
 
+OLAPStatus AlphaRowsetWriter::_add_row(const Tuple* tuple, const std::vector<SlotDescriptor*>& slot_descs) {
+    if (_writer_state != WRITER_INITED) {
+        RETURN_NOT_OK(_init());
+    }
+    OLAPStatus status = _column_data_writer->write(tuple, slot_descs);
+    if (status != OLAP_SUCCESS) {
+        std::string error_msg = "add row failed";
+        LOG(WARNING) << error_msg;
+        return status;
+    }
+    ++_num_rows_written;
+    return OLAP_SUCCESS;
+}
+
 OLAPStatus AlphaRowsetWriter::add_rowset(RowsetSharedPtr rowset) {
     _need_column_data_writer = false;
     // this api is for clone

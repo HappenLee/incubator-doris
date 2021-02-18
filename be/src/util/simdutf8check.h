@@ -369,7 +369,7 @@ static struct avx_processed_utf_bytes avxcheckUTF8Bytes_asciipath(
     return pb;
 }
 
-static bool validate_utf8_fast_avx_asciipath(const char* src, size_t len) {
+ [[maybe_unused]] static bool validate_utf8_fast_avx_asciipath(const char* src, size_t len) {
     size_t i = 0;
     __m256i has_error = _mm256_setzero_si256();
     struct avx_processed_utf_bytes previous = {.rawbytes = _mm256_setzero_si256(),
@@ -400,7 +400,7 @@ static bool validate_utf8_fast_avx_asciipath(const char* src, size_t len) {
     return _mm256_testz_si256(has_error, has_error);
 }
 
-static bool validate_utf8_fast_avx(const char* src, size_t len) {
+[[maybe_unused]] static bool validate_utf8_fast_avx(const char* src, size_t len) {
     size_t i = 0;
     __m256i has_error = _mm256_setzero_si256();
     struct avx_processed_utf_bytes previous = {.rawbytes = _mm256_setzero_si256(),

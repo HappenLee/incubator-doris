@@ -159,7 +159,7 @@ public:
 
     virtual void TearDown() { tear_down(); }
 
-private:
+protected:
     std::unique_ptr<RowsetWriter> _alpha_rowset_writer;
     std::shared_ptr<MemTracker> _mem_tracker;
     std::unique_ptr<MemPool> _mem_pool;
@@ -248,6 +248,75 @@ TEST_F(AlphaRowsetTest, TestAlphaRowsetReader) {
     res = rowset_reader->next_block(&row_block);
     ASSERT_EQ(OLAP_SUCCESS, res);
     ASSERT_EQ(1, row_block->remaining());
+}
+
+TEST_F(AlphaRowsetTest, TestAlphaRowsetTupleWrite) {
+    TabletSchema tablet_schema;
+    create_tablet_schema(AGG_KEYS, &tablet_schema);
+    RowsetWriterContext rowset_writer_context;
+    create_rowset_writer_context(&tablet_schema, &rowset_writer_context);
+
+    ASSERT_EQ(OLAP_SUCCESS,
+              RowsetFactory::create_rowset_writer(rowset_writer_context, &_alpha_rowset_writer));
+
+    // 1.init tuple and tuple_desc
+    ObjectPool object_pool;
+    auto tuple_desc = tablet_schema.get_tuple_desc(&object_pool);
+    MemTracker tracker(-1, "test");
+    MemPool mem_pool(&tracker);
+    auto tuple = Tuple::create(tuple_desc->byte_size(), &mem_pool);
+
+    // 2. set the data of the tuple
+    *(int32_t*)tuple->get_slot(tuple_desc->slots()[0]->tuple_offset()) = 10;
+    auto str_val = (StringValue*)tuple->get_slot(tuple_desc->slots()[1]->tuple_offset());
+    str_val->ptr = const_cast<char*>("well");
+    str_val->len = 4;
+    *(int32_t*)tuple->get_slot(tuple_desc->slots()[2]->tuple_offset()) = 100;
+
+    // 3. insert into alpha row writer and flush
+    auto res = _alpha_rowset_writer->add_row(tuple, tuple_desc->slots());
+    ASSERT_EQ(OLAP_SUCCESS, res);
+    res = _alpha_rowset_writer->flush();
+    ASSERT_EQ(OLAP_SUCCESS, res);
+
+    // 4. read from alpha_rowset
+    RowsetSharedPtr alpha_rowset = _alpha_rowset_writer->build();
+    ASSERT_TRUE(alpha_rowset != nullptr);
+    RowsetId rowset_id;
+    rowset_id.init(10000);
+    ASSERT_EQ(rowset_id, alpha_rowset->rowset_id());
+    ASSERT_EQ(1, alpha_rowset->num_rows());
+    RowsetReaderSharedPtr rowset_reader;
+    res = alpha_rowset->create_reader(&rowset_reader);
+    ASSERT_EQ(OLAP_SUCCESS, res);
+    std::vector<uint32_t> return_columns;
+    for (int i = 0; i < tablet_schema.num_columns(); ++i) {
+        return_columns.push_back(i);
+    }
+    DeleteHandler delete_handler;
+    DelPredicateArray predicate_array;
+    res = delete_handler.init(tablet_schema, predicate_array, 4);
+    ASSERT_EQ(OLAP_SUCCESS, res);
+    RowsetReaderContext rowset_reader_context;
+
+    std::set<uint32_t> load_bf_columns;
+    std::vector<ColumnPredicate*> predicates;
+    Conditions conditions;
+    create_rowset_reader_context(&tablet_schema, &return_columns, &delete_handler, &predicates,
+                                 &load_bf_columns, &conditions, &rowset_reader_context);
+    res = rowset_reader->init(&rowset_reader_context);
+    ASSERT_EQ(OLAP_SUCCESS, res);
+    RowBlock* row_block = nullptr;
+    res = rowset_reader->next_block(&row_block);
+    ASSERT_EQ(OLAP_SUCCESS, res);
+    ASSERT_EQ(1, row_block->remaining());
+
+    // 5. check the data
+    RowCursor row;
+    res = row.init(tablet_schema);
+    ASSERT_EQ(OLAP_SUCCESS, res);
+    row_block->get_row(0, &row);
+    ASSERT_STREQ("0&10|0&well|0&100", row.to_string().c_str());
 }
 
 TEST_F(AlphaRowsetTest, TestRowCursorWithOrdinal) {

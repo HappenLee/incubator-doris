@@ -29,6 +29,7 @@ namespace doris {
 class ContiguousRow;
 class MemTable;
 class RowCursor;
+class Tuple;
 
 class RowsetWriter {
 public:
@@ -41,6 +42,7 @@ public:
     // referenced by `row`. That means callers are free to de-allocate memory for `row` after this method returns.
     virtual OLAPStatus add_row(const RowCursor& row) = 0;
     virtual OLAPStatus add_row(const ContiguousRow& row) = 0;
+    virtual OLAPStatus add_row(const Tuple* tuple, const std::vector<SlotDescriptor*>& slot_descs) = 0;
 
     // Precondition: the input `rowset` should have the same type of the rowset we're building
     virtual OLAPStatus add_rowset(RowsetSharedPtr rowset) = 0;

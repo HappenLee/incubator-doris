@@ -121,7 +121,22 @@ OLAPStatus ColumnDataWriter::write(const RowType& row) {
     // copy input row to row block
     _row_block->get_row(_row_index, &_cursor);
     copy_row(&_cursor, row, _row_block->mem_pool());
-    next(row);
+    next(_cursor);
+    if (_row_index >= _segment_group->get_num_rows_per_row_block()) {
+        if (OLAP_SUCCESS != _flush_row_block(false)) {
+            LOG(WARNING) << "failed to flush data while attaching row cursor.";
+            return OLAP_ERR_OTHER_ERROR;
+        }
+        RETURN_NOT_OK(_flush_segment_with_verification());
+    }
+    return OLAP_SUCCESS;
+}
+
+OLAPStatus ColumnDataWriter::write(const Tuple* tuple, const std::vector<SlotDescriptor*>& slot_descs) {
+    // copy input row to row block
+    _row_block->get_row(_row_index, &_cursor);
+    copy_row(&_cursor, tuple, slot_descs, _row_block->mem_pool());
+    next(_cursor);
     if (_row_index >= _segment_group->get_num_rows_per_row_block()) {
         if (OLAP_SUCCESS != _flush_row_block(false)) {
             LOG(WARNING) << "failed to flush data while attaching row cursor.";

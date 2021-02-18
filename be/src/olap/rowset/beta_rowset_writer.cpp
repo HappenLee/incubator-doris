@@ -110,6 +110,24 @@ OLAPStatus BetaRowsetWriter::_add_row(const RowType& row) {
 template OLAPStatus BetaRowsetWriter::_add_row(const RowCursor& row);
 template OLAPStatus BetaRowsetWriter::_add_row(const ContiguousRow& row);
 
+OLAPStatus BetaRowsetWriter::_add_row(const Tuple* tuple, const std::vector<SlotDescriptor*>& slot_descs) {
+    if (PREDICT_FALSE(_segment_writer == nullptr)) {
+        RETURN_NOT_OK(_create_segment_writer(&_segment_writer));
+    }
+    // TODO update rowset zonemap
+    auto s = _segment_writer->append_row(tuple, slot_descs);
+    if (PREDICT_FALSE(!s.ok())) {
+        LOG(WARNING) << "failed to append row: " << s.to_string();
+        return OLAP_ERR_WRITER_DATA_WRITE_ERROR;
+    }
+    if (PREDICT_FALSE(_segment_writer->estimate_segment_size() >= MAX_SEGMENT_SIZE ||
+                      _segment_writer->num_rows_written() >= _context.max_rows_per_segment)) {
+        RETURN_NOT_OK(_flush_segment_writer(&_segment_writer));
+    }
+    ++_num_rows_written;
+    return OLAP_SUCCESS;
+}
+
 OLAPStatus BetaRowsetWriter::add_rowset(RowsetSharedPtr rowset) {
     assert(rowset->rowset_meta()->rowset_type() == BETA_ROWSET);
     RETURN_NOT_OK(rowset->link_files_to(_context.rowset_path_prefix, _context.rowset_id));
@@ -151,8 +169,8 @@ OLAPStatus BetaRowsetWriter::flush_single_memtable(MemTable* memtable, int64_t* 
         RETURN_NOT_OK(_create_segment_writer(&writer));
     }
     for ( ; it.valid(); it.next()) {
-        ContiguousRow dst_row = it.get_current_row();
-        auto s = writer->append_row(dst_row);
+        auto tuple = it.get_current_tuple();
+        auto s = writer->append_row(tuple, memtable->get_slot_descs());
         if (PREDICT_FALSE(!s.ok())) {
             LOG(WARNING) << "failed to append row: " << s.to_string();
             return OLAP_ERR_WRITER_DATA_WRITE_ERROR;

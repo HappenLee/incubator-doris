@@ -24,6 +24,8 @@
 #include "olap/rowset/segment_v2/common.h"
 #include "olap/rowset/segment_v2/page_pointer.h" // for PagePointer
 #include "olap/tablet_schema.h"                  // for TabletColumn
+#include "runtime/tuple.h"
+#include "runtime/descriptors.h"
 #include "util/bitmap.h"                         // for BitmapChange
 #include "util/slice.h"                          // for OwnedSlice
 
@@ -91,6 +93,17 @@ public:
             return append_not_nulls(cell.cell_ptr(), 1);
         }
     }
+
+    Status append(const Tuple* tuple, const SlotDescriptor* desc) {
+        if (_is_nullable) {
+            uint8_t nullmap = 0;
+            BitmapChange(&nullmap, 0, tuple->is_null(desc->null_indicator_offset()));
+            return append_nullable(&nullmap, tuple->get_slot(desc->tuple_offset()), 1);
+        } else {
+            return append_not_nulls(tuple->get_slot(desc->tuple_offset()), 1);
+        }
+    }
+
 
     // Now we only support append one by one, we should support append
     // multi rows in one call

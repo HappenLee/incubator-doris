@@ -17,8 +17,11 @@
 
 #include "olap/task/engine_checksum_task.h"
 
+#include "exprs/slot_ref.h"
 #include "olap/reader.h"
 #include "olap/row.h"
+#include "runtime/tuple_row.h"
+#include "runtime/raw_value.h"
 
 namespace doris {
 
@@ -78,9 +81,18 @@ OLAPStatus EngineChecksumTask::_compute_checksum() {
         }
     }
 
-    for (size_t i = 0; i < tablet->tablet_schema().num_columns(); ++i) {
+    std::shared_ptr<MemTracker> tracker(new MemTracker(-1));
+    std::unique_ptr<MemPool> mem_pool(new MemPool(tracker.get()));
+    std::unique_ptr<ObjectPool> agg_object_pool(new ObjectPool());
+
+    for (uint32_t i = 0; i < tablet->tablet_schema().num_columns(); ++i) {
         reader_params.return_columns.push_back(i);
+        reader_params.return_columns_of_tuple.push_back(i);
     }
+    auto* tuple_desc = tablet->tablet_schema().get_tuple_desc(agg_object_pool.get());
+    reader_params.query_slots = tuple_desc->slots();
+    Tuple* tuple = Tuple::create(tuple_desc->byte_size(), mem_pool.get());
+    const auto& slot_descs = tuple_desc->slots();
 
     res = reader.init(reader_params);
     if (res != OLAP_SUCCESS) {
@@ -88,22 +100,13 @@ OLAPStatus EngineChecksumTask::_compute_checksum() {
         return res;
     }
 
-    RowCursor row;
-    std::shared_ptr<MemTracker> tracker(new MemTracker(-1));
-    std::unique_ptr<MemPool> mem_pool(new MemPool(tracker.get()));
-    std::unique_ptr<ObjectPool> agg_object_pool(new ObjectPool());
-    res = row.init(tablet->tablet_schema(), reader_params.return_columns);
-    if (res != OLAP_SUCCESS) {
-        OLAP_LOG_WARNING("failed to init row cursor. [res=%d]", res);
-        return res;
-    }
-    row.allocate_memory_for_string_type(tablet->tablet_schema());
-
+    std::unique_ptr<MemPool> reader_mem_pool(new MemPool(tracker.get()));
+    std::unique_ptr<ObjectPool> reader_agg_object_pool(new ObjectPool());
     bool eof = false;
     uint32_t row_checksum = 0;
     while (true) {
         OLAPStatus res =
-                reader.next_row_with_aggregation(&row, mem_pool.get(), agg_object_pool.get(), &eof);
+                reader.next_tuple_with_aggregation(tuple, reader_mem_pool.get(), reader_agg_object_pool.get(), &eof);
         if (res == OLAP_SUCCESS && eof) {
             VLOG_NOTICE << "reader reads to the end.";
             break;
@@ -111,12 +114,20 @@ OLAPStatus EngineChecksumTask::_compute_checksum() {
             OLAP_LOG_WARNING("fail to read in reader. [res=%d]", res);
             return res;
         }
+
         // The value of checksum is independent of the sorting of data rows.
-        row_checksum ^= hash_row(row, 0);
+        for (auto slot : slot_descs) {
+            // The approximation of float/double in a certain precision range, the binary of byte is not
+            // a fixed value, so these two types are ignored in calculating hash code.
+            if (slot->type().type == TYPE_FLOAT || slot->type().type == TYPE_DOUBLE) continue;
+            bool is_null = tuple->is_null(slot->null_indicator_offset());
+            const void* val = is_null ? nullptr : tuple->get_slot(slot->tuple_offset());
+            row_checksum = RawValue::zlib_crc32(val, slot->type(), row_checksum);
+        }
         // the memory allocate by mem pool has been copied,
         // so we should release memory immediately
-        mem_pool->clear();
-        agg_object_pool.reset(new ObjectPool());
+        reader_mem_pool->clear();
+        reader_agg_object_pool.reset(new ObjectPool());
     }
 
     LOG(INFO) << "success to finish compute checksum. checksum=" << row_checksum;

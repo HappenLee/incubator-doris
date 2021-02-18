@@ -78,6 +78,9 @@ protected:
         if (FileUtils::check_exist(config::storage_root_path)) {
             ASSERT_TRUE(FileUtils::remove_all(config::storage_root_path).ok());
         }
+        if (k_engine != nullptr) {
+            delete k_engine;
+        }
     }
 
     // (k1 int, k2 varchar(20), k3 int) duplicated key (k1, k2)
@@ -350,6 +353,204 @@ TEST_F(BetaRowsetTest, BasicFunctionTest) {
     }
 }
 
+TEST_F(BetaRowsetTest, TupleWriteTest) {
+    OLAPStatus s;
+    TabletSchema tablet_schema;
+    create_tablet_schema(&tablet_schema);
+
+    RowsetSharedPtr rowset;
+    const int num_segments = 3;
+    const uint32_t rows_per_segment = 4096;
+    { // write `num_segments * rows_per_segment` rows to rowset
+        RowsetWriterContext writer_context;
+        create_rowset_writer_context(&tablet_schema, &writer_context);
+
+        std::unique_ptr<RowsetWriter> rowset_writer;
+        s = RowsetFactory::create_rowset_writer(writer_context, &rowset_writer);
+        ASSERT_EQ(OLAP_SUCCESS, s);
+
+        ObjectPool object_pool;
+        auto tuple_desc = tablet_schema.get_tuple_desc(&object_pool);
+        MemTracker tracker(-1, "test");
+        MemPool mem_pool(&tracker);
+        auto tuple = Tuple::create(tuple_desc->byte_size(), &mem_pool);
+
+        // for segment "i", row "rid"
+        // k1 := rid*10 + i
+        // k2 := k1 * 10
+        // k3 := 4096 * i + rid
+        for (int i = 0; i < num_segments; ++i) {
+            auto tracker = std::make_shared<MemTracker>();
+            MemPool mem_pool(tracker.get());
+            for (int rid = 0; rid < rows_per_segment; ++rid) {
+                *(uint32_t*)tuple->get_slot(tuple_desc->slots()[0]->tuple_offset()) = rid * 10 + i;
+                *(uint32_t*)tuple->get_slot(tuple_desc->slots()[1]->tuple_offset()) = (rid * 10 + i) * 10;
+                *(uint32_t*)tuple->get_slot(tuple_desc->slots()[2]->tuple_offset()) = rows_per_segment * i + rid;
+                s = rowset_writer->add_row(tuple, tuple_desc->slots());
+                ASSERT_EQ(OLAP_SUCCESS, s);
+            }
+            s = rowset_writer->flush();
+            ASSERT_EQ(OLAP_SUCCESS, s);
+        }
+
+        rowset = rowset_writer->build();
+        ASSERT_TRUE(rowset != nullptr);
+        ASSERT_EQ(num_segments, rowset->rowset_meta()->num_segments());
+        ASSERT_EQ(num_segments * rows_per_segment, rowset->rowset_meta()->num_rows());
+    }
+
+    { // test return ordered results and return k1 and k2
+        RowsetReaderContext reader_context;
+        reader_context.tablet_schema = &tablet_schema;
+        reader_context.need_ordered_result = true;
+        std::vector<uint32_t> return_columns = {0, 1};
+        reader_context.return_columns = &return_columns;
+        reader_context.seek_columns = &return_columns;
+        reader_context.stats = &_stats;
+
+        // without predicates
+        {
+            RowsetReaderSharedPtr rowset_reader;
+            create_and_init_rowset_reader(rowset.get(), reader_context, &rowset_reader);
+            RowBlock* output_block;
+            uint32_t num_rows_read = 0;
+            while ((s = rowset_reader->next_block(&output_block)) == OLAP_SUCCESS) {
+                ASSERT_TRUE(output_block != nullptr);
+                ASSERT_GT(output_block->row_num(), 0);
+                ASSERT_EQ(0, output_block->pos());
+                ASSERT_EQ(output_block->row_num(), output_block->limit());
+                ASSERT_EQ(return_columns, output_block->row_block_info().column_ids);
+                // after sort merge segments, k1 will be 0, 1, 2, 10, 11, 12, 20, 21, 22, ..., 40950, 40951, 40952
+                for (int i = 0; i < output_block->row_num(); ++i) {
+                    char* field1 = output_block->field_ptr(i, 0);
+                    char* field2 = output_block->field_ptr(i, 1);
+                    // test null bit
+                    ASSERT_FALSE(*reinterpret_cast<bool*>(field1));
+                    ASSERT_FALSE(*reinterpret_cast<bool*>(field2));
+                    uint32_t k1 = *reinterpret_cast<uint32_t*>(field1 + 1);
+                    uint32_t k2 = *reinterpret_cast<uint32_t*>(field2 + 1);
+                    ASSERT_EQ(k1 * 10, k2);
+
+                    int rid = num_rows_read / 3;
+                    int seg_id = num_rows_read % 3;
+                    ASSERT_EQ(rid * 10 + seg_id, k1);
+                    num_rows_read++;
+                }
+            }
+            EXPECT_EQ(OLAP_ERR_DATA_EOF, s);
+            EXPECT_TRUE(output_block == nullptr);
+            EXPECT_EQ(rowset->rowset_meta()->num_rows(), num_rows_read);
+        }
+
+        // merge segments with predicates
+        {
+            std::vector<ColumnPredicate*> column_predicates;
+            // column predicate: k1 = 10
+            std::unique_ptr<ColumnPredicate> predicate(new EqualPredicate<int32_t>(0, 10));
+            column_predicates.emplace_back(predicate.get());
+            reader_context.predicates = &column_predicates;
+            RowsetReaderSharedPtr rowset_reader;
+            create_and_init_rowset_reader(rowset.get(), reader_context, &rowset_reader);
+            RowBlock* output_block;
+            uint32_t num_rows_read = 0;
+            while ((s = rowset_reader->next_block(&output_block)) == OLAP_SUCCESS) {
+                ASSERT_TRUE(output_block != nullptr);
+                ASSERT_EQ(1, output_block->row_num());
+                ASSERT_EQ(0, output_block->pos());
+                ASSERT_EQ(output_block->row_num(), output_block->limit());
+                ASSERT_EQ(return_columns, output_block->row_block_info().column_ids);
+                // after sort merge segments, k1 will be 10
+                for (int i = 0; i < output_block->row_num(); ++i) {
+                    char* field1 = output_block->field_ptr(i, 0);
+                    char* field2 = output_block->field_ptr(i, 1);
+                    // test null bit
+                    ASSERT_FALSE(*reinterpret_cast<bool*>(field1));
+                    ASSERT_FALSE(*reinterpret_cast<bool*>(field2));
+                    uint32_t k1 = *reinterpret_cast<uint32_t*>(field1 + 1);
+                    uint32_t k2 = *reinterpret_cast<uint32_t*>(field2 + 1);
+                    ASSERT_EQ(10, k1);
+                    ASSERT_EQ(k1 * 10, k2);
+                    num_rows_read++;
+                }
+            }
+            EXPECT_EQ(OLAP_ERR_DATA_EOF, s);
+            EXPECT_TRUE(output_block == nullptr);
+            EXPECT_EQ(1, num_rows_read);
+        }
+    }
+
+    { // test return unordered data and only k3
+        RowsetReaderContext reader_context;
+        reader_context.tablet_schema = &tablet_schema;
+        reader_context.need_ordered_result = false;
+        std::vector<uint32_t> return_columns = {2};
+        reader_context.return_columns = &return_columns;
+        reader_context.seek_columns = &return_columns;
+        reader_context.stats = &_stats;
+
+        // without predicate
+        {
+            RowsetReaderSharedPtr rowset_reader;
+            create_and_init_rowset_reader(rowset.get(), reader_context, &rowset_reader);
+
+            RowBlock* output_block;
+            uint32_t num_rows_read = 0;
+            while ((s = rowset_reader->next_block(&output_block)) == OLAP_SUCCESS) {
+                ASSERT_TRUE(output_block != nullptr);
+                ASSERT_GT(output_block->row_num(), 0);
+                ASSERT_EQ(0, output_block->pos());
+                ASSERT_EQ(output_block->row_num(), output_block->limit());
+                ASSERT_EQ(return_columns, output_block->row_block_info().column_ids);
+                // for unordered result, k3 will be 0, 1, 2, ..., 4096*3-1
+                for (int i = 0; i < output_block->row_num(); ++i) {
+                    char* field3 = output_block->field_ptr(i, 2);
+                    // test null bit
+                    ASSERT_FALSE(*reinterpret_cast<bool*>(field3));
+                    uint32_t k3 = *reinterpret_cast<uint32_t*>(field3 + 1);
+                    ASSERT_EQ(num_rows_read, k3);
+                    num_rows_read++;
+                }
+            }
+            EXPECT_EQ(OLAP_ERR_DATA_EOF, s);
+            EXPECT_TRUE(output_block == nullptr);
+            EXPECT_EQ(rowset->rowset_meta()->num_rows(), num_rows_read);
+        }
+
+        // with predicate
+        {
+            std::vector<ColumnPredicate*> column_predicates;
+            // column predicate: k3 < 100
+            ColumnPredicate* predicate = new LessPredicate<int32_t>(2, 100);
+            column_predicates.emplace_back(predicate);
+            reader_context.predicates = &column_predicates;
+            RowsetReaderSharedPtr rowset_reader;
+            create_and_init_rowset_reader(rowset.get(), reader_context, &rowset_reader);
+
+            RowBlock* output_block;
+            uint32_t num_rows_read = 0;
+            while ((s = rowset_reader->next_block(&output_block)) == OLAP_SUCCESS) {
+                ASSERT_TRUE(output_block != nullptr);
+                ASSERT_LE(output_block->row_num(), 100);
+                ASSERT_EQ(0, output_block->pos());
+                ASSERT_EQ(output_block->row_num(), output_block->limit());
+                ASSERT_EQ(return_columns, output_block->row_block_info().column_ids);
+                // for unordered result, k3 will be 0, 1, 2, ..., 99
+                for (int i = 0; i < output_block->row_num(); ++i) {
+                    char* field3 = output_block->field_ptr(i, 2);
+                    // test null bit
+                    ASSERT_FALSE(*reinterpret_cast<bool*>(field3));
+                    uint32_t k3 = *reinterpret_cast<uint32_t*>(field3 + 1);
+                    ASSERT_EQ(num_rows_read, k3);
+                    num_rows_read++;
+                }
+            }
+            EXPECT_EQ(OLAP_ERR_DATA_EOF, s);
+            EXPECT_TRUE(output_block == nullptr);
+            EXPECT_EQ(100, num_rows_read);
+            delete predicate;
+        }
+    }
+}
 } // namespace doris
 
 int main(int argc, char** argv) {

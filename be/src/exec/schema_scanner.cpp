@@ -29,6 +29,7 @@
 #include "exec/schema_scanner/schema_variables_scanner.h"
 #include "exec/schema_scanner/schema_views_scanner.h"
 #include "exec/schema_scanner/schema_statistics_scanner.h"
+#include "runtime/primitive_type.h"
 
 namespace doris {
 
@@ -127,7 +128,14 @@ Status SchemaScanner::create_tuple_desc(ObjectPool* pool) {
 
     for (int i = 0; i < _column_num; ++i) {
         TSlotDescriptor t_slot_desc;
-        t_slot_desc.__set_slotType(TypeDescriptor(_columns[i].type).to_thrift());
+        auto type_desc = TypeDescriptor(_columns[i].type);
+        // just set precision and scale for decimal to avoid DECHECK in DECIMAL of precision and scale
+        // now doris do not use the precision and scale indeed
+        if (_columns[i].type == TYPE_DECIMAL || _columns[i].type == TYPE_DECIMALV2) {
+            type_desc.precision = 1;
+            type_desc.scale = 1;
+        }
+        t_slot_desc.__set_slotType(type_desc.to_thrift());
         t_slot_desc.__set_colName(_columns[i].name);
         t_slot_desc.__set_columnPos(i);
         t_slot_desc.__set_byteOffset(offset);

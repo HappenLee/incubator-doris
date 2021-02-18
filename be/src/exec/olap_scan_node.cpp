@@ -59,7 +59,8 @@ OlapScanNode::OlapScanNode(ObjectPool* pool, const TPlanNode& tnode, const Descr
           _status(Status::OK()),
           _resource_info(nullptr),
           _buffered_bytes(0),
-          _eval_conjuncts_fn(nullptr) {}
+          _eval_conjuncts_fn(nullptr) {
+}
 
 OlapScanNode::~OlapScanNode() {}
 

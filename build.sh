@@ -41,7 +41,8 @@ if [[ ! -f ${DORIS_THIRDPARTY}/installed/lib/libs2.a ]]; then
     ${DORIS_THIRDPARTY}/build-thirdparty.sh
 fi
 
-PARALLEL=$[$(nproc)/4+1]
+#PARALLEL=$[$(nproc)/4+1]
+PARALLEL=$[$(nproc)+1]
 
 # Check args
 usage() {
@@ -53,7 +54,6 @@ Usage: $0 <options>
      --ui               build Frontend web ui with npm
      --spark-dpp        build Spark DPP application
      --clean            clean and build target
-
   Eg.
     $0                                      build all
     $0 --be                                 build Backend without clean

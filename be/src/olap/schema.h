@@ -37,7 +37,7 @@ namespace doris {
 // we store all column schema maybe accessed here. And default access through column id
 class Schema {
 public:
-    Schema(const TabletSchema& tablet_schema) {
+    Schema(const TabletSchema& tablet_schema) : _num_short_key_columns(tablet_schema.num_short_key_columns()) {
         size_t num_columns = tablet_schema.num_columns();
         std::vector<ColumnId> col_ids(num_columns);
         std::vector<TabletColumn> columns;
@@ -104,6 +104,7 @@ public:
     const Field* column(ColumnId cid) const { return _cols[cid]; }
 
     size_t num_key_columns() const { return _num_key_columns; }
+    size_t num_short_key_columns() const { return _num_short_key_columns; };
     size_t schema_size() const { return _schema_size; }
 
     size_t column_offset(ColumnId cid) const { return _col_offsets[cid]; }
@@ -145,6 +146,7 @@ private:
     std::vector<size_t> _col_offsets;
 
     size_t _num_key_columns;
+    size_t _num_short_key_columns;
     size_t _schema_size;
     int32_t _delete_sign_idx = -1;
     bool _has_sequence_col = false;

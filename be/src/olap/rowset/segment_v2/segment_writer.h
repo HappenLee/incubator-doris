@@ -25,14 +25,17 @@
 #include "common/status.h" // Status
 #include "gen_cpp/segment_v2.pb.h"
 #include "gutil/macros.h"
+#include "olap/schema.h"
 
 namespace doris {
 
 class RowBlock;
 class RowCursor;
+class Tuple;
 class TabletSchema;
 class TabletColumn;
 class ShortKeyIndexBuilder;
+class SlotDescriptor;
 
 namespace fs {
 class WritableBlock;
@@ -60,6 +63,8 @@ public:
     template <typename RowType>
     Status append_row(const RowType& row);
 
+    Status append_row(const Tuple* tuple, const std::vector<SlotDescriptor*>& slot_descs);
+
     uint64_t estimate_segment_size();
 
     uint32_t num_rows_written() { return _row_count; }
@@ -81,6 +86,7 @@ private:
 private:
     uint32_t _segment_id;
     const TabletSchema* _tablet_schema;
+    const Schema _schema;
     SegmentWriterOptions _opts;
 
     // Not owned. owned by RowsetWriter

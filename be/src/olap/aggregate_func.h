@@ -123,10 +123,10 @@ struct AggregateFuncTraits<OLAP_FIELD_AGGREGATION_NONE, OLAP_FIELD_TYPE_DECIMAL>
             return;
         }
 
-        auto* decimal_value = reinterpret_cast<const DecimalV2Value*>(src);
+        auto decimal_value = *reinterpret_cast<const DecimalV2Value*>(src);
         auto* storage_decimal_value = reinterpret_cast<decimal12_t*>(dst->mutable_cell_ptr());
-        storage_decimal_value->integer = decimal_value->int_value();
-        storage_decimal_value->fraction = decimal_value->frac_value();
+        storage_decimal_value->integer = decimal_value.int_value();
+        storage_decimal_value->fraction = decimal_value.frac_value();
     }
 };
 
@@ -140,9 +140,9 @@ struct AggregateFuncTraits<OLAP_FIELD_AGGREGATION_NONE, OLAP_FIELD_TYPE_DATETIME
             return;
         }
 
-        auto* datetime_value = reinterpret_cast<const DateTimeValue*>(src);
+        auto datetime_value = *reinterpret_cast<const DateTimeValue*>(src);
         auto* storage_datetime_value = reinterpret_cast<uint64_t*>(dst->mutable_cell_ptr());
-        *storage_datetime_value = datetime_value->to_olap_datetime();
+        *storage_datetime_value = datetime_value.to_olap_datetime();
     }
 };
 
@@ -156,9 +156,9 @@ struct AggregateFuncTraits<OLAP_FIELD_AGGREGATION_NONE, OLAP_FIELD_TYPE_DATE>
             return;
         }
 
-        auto* date_value = reinterpret_cast<const DateTimeValue*>(src);
+        auto date_value = *reinterpret_cast<const DateTimeValue*>(src);
         auto* storage_date_value = reinterpret_cast<uint24_t*>(dst->mutable_cell_ptr());
-        *storage_date_value = static_cast<int64_t>(date_value->to_olap_date());
+        *storage_date_value = static_cast<int64_t>(date_value.to_olap_date());
     }
 };
 
@@ -455,15 +455,15 @@ struct AggregateFuncTraits<OLAP_FIELD_AGGREGATION_HLL_UNION, OLAP_FIELD_TYPE_HLL
         DCHECK_EQ(src_null, false);
         dst->set_not_null();
 
-        auto* src_slice = reinterpret_cast<const Slice*>(src);
-        auto* dst_slice = reinterpret_cast<Slice*>(dst->mutable_cell_ptr());
+        auto src_slice = *reinterpret_cast<const Slice*>(src);
+        auto* hll = new HyperLogLog(src_slice);
 
+        auto* dst_slice = reinterpret_cast<Slice*>(dst->mutable_cell_ptr());
         // we use zero size represent this slice is a agg object
         dst_slice->size = 0;
-        auto* hll = new HyperLogLog(*src_slice);
         dst_slice->data = reinterpret_cast<char*>(hll);
 
-        mem_pool->mem_tracker()->Consume(sizeof(HyperLogLog));
+//        mem_pool->mem_tracker()->Consume(sizeof(HyperLogLog));
 
         agg_pool->add(hll);
     }
@@ -502,17 +502,15 @@ struct AggregateFuncTraits<OLAP_FIELD_AGGREGATION_BITMAP_UNION, OLAP_FIELD_TYPE_
                      ObjectPool* agg_pool) {
         DCHECK_EQ(src_null, false);
         dst->set_not_null();
-        auto* src_slice = reinterpret_cast<const Slice*>(src);
-        auto* dst_slice = reinterpret_cast<Slice*>(dst->mutable_cell_ptr());
+        auto src_slice = *reinterpret_cast<const Slice*>(src);
+        auto bitmap = new BitmapValue(src_slice.data);
 
+        auto* dst_slice = reinterpret_cast<Slice*>(dst->mutable_cell_ptr());
         // we use zero size represent this slice is a agg object
         dst_slice->size = 0;
-        auto bitmap = new BitmapValue(src_slice->data);
-
         dst_slice->data = (char*)bitmap;
 
-        mem_pool->mem_tracker()->Consume(sizeof(BitmapValue));
-
+//        mem_pool->mem_tracker()->Consume(sizeof(BitmapValue));
         agg_pool->add(bitmap);
     }
 

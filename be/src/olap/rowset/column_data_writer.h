@@ -42,6 +42,8 @@ public:
     template <typename RowType>
     OLAPStatus write(const RowType& row);
 
+    OLAPStatus write(const Tuple* tuple, const std::vector<SlotDescriptor*>& slot_descs);
+
     template <typename RowType>
     void next(const RowType& row);
 

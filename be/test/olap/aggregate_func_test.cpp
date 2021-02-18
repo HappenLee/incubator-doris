@@ -17,6 +17,7 @@
 
 #include "olap/aggregate_func.h"
 
+#include <boost/algorithm/string/trim.hpp>
 #include <gtest/gtest.h>
 
 #include "common/object_pool.h"
@@ -103,9 +104,92 @@ void test_min() {
     ASSERT_EQ(50, val);
 }
 
+template <FieldType field_type>
+void test_min_decimal() {
+    using CppType = typename CppTypeTraits<field_type>::CppType;
+    static const size_t kValSize = sizeof(DecimalV2Value) + 1; // '1' represent the leading bool flag.
+    char buf[64];
+
+    std::shared_ptr<MemTracker> tracker(new MemTracker(-1));
+    std::unique_ptr<MemPool> mem_pool(new MemPool(tracker.get()));
+    ObjectPool agg_object_pool;
+    const AggregateInfo* agg = get_aggregate_info(OLAP_FIELD_AGGREGATION_MIN, field_type);
+
+    RowCursorCell dst(buf);
+    // null
+    {
+        char val_buf[kValSize];
+        DecimalV2Value val("100.11");
+        memcpy(val_buf + 1, &val, sizeof(DecimalV2Value));
+        agg->init(&dst, val_buf + 1, false, mem_pool.get(), &agg_object_pool);
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("100.11", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                boost::algorithm::is_any_of("0")).c_str());
+    }
+
+    // 200.234
+    {
+        char val_buf[kValSize];
+        *(bool*)val_buf = false;
+        CppType val;
+        val.from_string("200.234");
+        memcpy(val_buf + 1, &val, sizeof(CppType));
+        agg->update(&dst, val_buf, mem_pool.get());
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("100.11", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                              boost::algorithm::is_any_of("0")).c_str());
+    }
+    // 50.234
+    {
+        char val_buf[kValSize];
+        *(bool*)val_buf = false;
+        CppType val;
+        val.from_string("50.234");
+        memcpy(val_buf + 1, &val, sizeof(CppType));
+        agg->update(&dst, val_buf, mem_pool.get());
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("50.234", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                              boost::algorithm::is_any_of("0")).c_str());
+    }
+    // null
+    {
+        char val_buf[kValSize];
+        *(bool*)val_buf = true;
+        agg->update(&dst, val_buf, mem_pool.get());
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("50.234", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                              boost::algorithm::is_any_of("0")).c_str());
+    }
+    agg->finalize(&dst, mem_pool.get());
+    ASSERT_FALSE(*(bool*)(buf));
+
+    decimal12_t agg_val;
+    memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+    CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+    ASSERT_STREQ("50.234", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                          boost::algorithm::is_any_of("0")).c_str());
+}
+
 TEST_F(AggregateFuncTest, min) {
     test_min<OLAP_FIELD_TYPE_INT>();
     test_min<OLAP_FIELD_TYPE_LARGEINT>();
+    test_min_decimal<OLAP_FIELD_TYPE_DECIMAL>();
 }
 
 template <FieldType field_type>
@@ -178,9 +262,92 @@ void test_max() {
     ASSERT_EQ(200, val);
 }
 
+template <FieldType field_type>
+void test_max_decimal() {
+    using CppType = typename CppTypeTraits<field_type>::CppType;
+    static const size_t kValSize = sizeof(DecimalV2Value) + 1; // '1' represent the leading bool flag.
+    char buf[64];
+
+    std::shared_ptr<MemTracker> tracker(new MemTracker(-1));
+    std::unique_ptr<MemPool> mem_pool(new MemPool(tracker.get()));
+    ObjectPool agg_object_pool;
+    const AggregateInfo* agg = get_aggregate_info(OLAP_FIELD_AGGREGATION_MAX, field_type);
+
+    RowCursorCell dst(buf);
+    // null
+    {
+        char val_buf[kValSize];
+        DecimalV2Value val("100.11");
+        memcpy(val_buf + 1, &val, sizeof(DecimalV2Value));
+        agg->init(&dst, val_buf + 1, false, mem_pool.get(), &agg_object_pool);
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("100.11", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                              boost::algorithm::is_any_of("0")).c_str());
+    }
+
+    // 200.234
+    {
+        char val_buf[kValSize];
+        *(bool*)val_buf = false;
+        CppType val;
+        val.from_string("200.234");
+        memcpy(val_buf + 1, &val, sizeof(CppType));
+        agg->update(&dst, val_buf, mem_pool.get());
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("200.234", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                              boost::algorithm::is_any_of("0")).c_str());
+    }
+    // 50.234
+    {
+        char val_buf[kValSize];
+        *(bool*)val_buf = false;
+        CppType val;
+        val.from_string("50.234");
+        memcpy(val_buf + 1, &val, sizeof(CppType));
+        agg->update(&dst, val_buf, mem_pool.get());
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("200.234", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                              boost::algorithm::is_any_of("0")).c_str());
+    }
+    // null
+    {
+        char val_buf[kValSize];
+        *(bool*)val_buf = true;
+        agg->update(&dst, val_buf, mem_pool.get());
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("200.234", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                              boost::algorithm::is_any_of("0")).c_str());
+    }
+    agg->finalize(&dst, mem_pool.get());
+    ASSERT_FALSE(*(bool*)(buf));
+
+    decimal12_t agg_val;
+    memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+    CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+    ASSERT_STREQ("200.234", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                          boost::algorithm::is_any_of("0")).c_str());
+}
+
 TEST_F(AggregateFuncTest, max) {
     test_max<OLAP_FIELD_TYPE_INT>();
     test_max<OLAP_FIELD_TYPE_LARGEINT>();
+    test_max_decimal<OLAP_FIELD_TYPE_DECIMAL>();
 }
 
 template <FieldType field_type>
@@ -253,9 +420,92 @@ void test_sum() {
     ASSERT_EQ(350, val);
 }
 
+template <FieldType field_type>
+void test_sum_decimal() {
+    using CppType = typename CppTypeTraits<field_type>::CppType;
+    static const size_t kValSize = sizeof(DecimalV2Value) + 1; // '1' represent the leading bool flag.
+    char buf[64];
+
+    std::shared_ptr<MemTracker> tracker(new MemTracker(-1));
+    std::unique_ptr<MemPool> mem_pool(new MemPool(tracker.get()));
+    ObjectPool agg_object_pool;
+    const AggregateInfo* agg = get_aggregate_info(OLAP_FIELD_AGGREGATION_SUM, field_type);
+
+    RowCursorCell dst(buf);
+    // null
+    {
+        char val_buf[kValSize];
+        DecimalV2Value val("100.11");
+        memcpy(val_buf + 1, &val, sizeof(DecimalV2Value));
+        agg->init(&dst, val_buf + 1, false, mem_pool.get(), &agg_object_pool);
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("100.11", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                              boost::algorithm::is_any_of("0")).c_str());
+    }
+
+    // 200.234
+    {
+        char val_buf[kValSize];
+        *(bool*)val_buf = false;
+        CppType val;
+        val.from_string("200.234");
+        memcpy(val_buf + 1, &val, sizeof(CppType));
+        agg->update(&dst, val_buf, mem_pool.get());
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("300.344", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                              boost::algorithm::is_any_of("0")).c_str());
+    }
+    // 50.234
+    {
+        char val_buf[kValSize];
+        *(bool*)val_buf = false;
+        CppType val;
+        val.from_string("50.234");
+        memcpy(val_buf + 1, &val, sizeof(CppType));
+        agg->update(&dst, val_buf, mem_pool.get());
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("350.578", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                               boost::algorithm::is_any_of("0")).c_str());
+    }
+    // null
+    {
+        char val_buf[kValSize];
+        *(bool*)val_buf = true;
+        agg->update(&dst, val_buf, mem_pool.get());
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("350.578", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                               boost::algorithm::is_any_of("0")).c_str());
+    }
+    agg->finalize(&dst, mem_pool.get());
+    ASSERT_FALSE(*(bool*)(buf));
+
+    decimal12_t agg_val;
+    memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+    CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+    ASSERT_STREQ("350.578", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                           boost::algorithm::is_any_of("0")).c_str());
+}
+
 TEST_F(AggregateFuncTest, sum) {
     test_sum<OLAP_FIELD_TYPE_INT>();
     test_sum<OLAP_FIELD_TYPE_LARGEINT>();
+    test_sum_decimal<OLAP_FIELD_TYPE_DECIMAL>();
 }
 
 template <FieldType field_type>
@@ -382,11 +632,82 @@ void test_replace_string() {
     ASSERT_STREQ("12345", dst_slice->to_string().c_str());
 }
 
+template <FieldType field_type>
+void test_replace_decimal() {
+    using CppType = typename CppTypeTraits<field_type>::CppType;
+    static const size_t kValSize = sizeof(DecimalV2Value) + 1; // '1' represent the leading bool flag.
+    char buf[64];
+
+    std::shared_ptr<MemTracker> tracker(new MemTracker(-1));
+    std::unique_ptr<MemPool> mem_pool(new MemPool(tracker.get()));
+    ObjectPool agg_object_pool;
+    const AggregateInfo* agg = get_aggregate_info(OLAP_FIELD_AGGREGATION_REPLACE, field_type);
+
+    RowCursorCell dst(buf);
+    // null
+    {
+        char val_buf[kValSize];
+        DecimalV2Value val("100.11");
+        memcpy(val_buf + 1, &val, sizeof(DecimalV2Value));
+        agg->init(&dst, val_buf + 1, false, mem_pool.get(), &agg_object_pool);
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("100.11", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                              boost::algorithm::is_any_of("0")).c_str());
+    }
+
+    // 200.234
+    {
+        char val_buf[kValSize];
+        *(bool*)val_buf = false;
+        CppType val;
+        val.from_string("200.234");
+        memcpy(val_buf + 1, &val, sizeof(CppType));
+        agg->update(&dst, val_buf, mem_pool.get());
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("200.234", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                               boost::algorithm::is_any_of("0")).c_str());
+    }
+    // 50.234
+    {
+        char val_buf[kValSize];
+        *(bool*)val_buf = false;
+        CppType val;
+        val.from_string("50.234");
+        memcpy(val_buf + 1, &val, sizeof(CppType));
+        agg->update(&dst, val_buf, mem_pool.get());
+        ASSERT_FALSE(*(bool*)(buf));
+
+        decimal12_t agg_val;
+        memcpy(&agg_val, buf + 1, sizeof(decimal12_t));
+        CppType agg_decimal_val(agg_val.integer, agg_val.fraction);
+        ASSERT_STREQ("50.234", boost::algorithm::trim_copy_if(agg_decimal_val.to_string(),
+                                                               boost::algorithm::is_any_of("0")).c_str());
+    }
+    // null
+    {
+        char val_buf[kValSize];
+        *(bool*)val_buf = true;
+        agg->update(&dst, val_buf, mem_pool.get());
+        ASSERT_TRUE(*(bool*)(buf));
+    }
+    agg->finalize(&dst, mem_pool.get());
+    ASSERT_TRUE(*(bool*)(buf));
+}
+
 TEST_F(AggregateFuncTest, replace) {
     test_replace<OLAP_FIELD_TYPE_INT>();
     test_replace<OLAP_FIELD_TYPE_LARGEINT>();
     test_replace_string<OLAP_FIELD_TYPE_CHAR>();
     test_replace_string<OLAP_FIELD_TYPE_VARCHAR>();
+    test_replace_decimal<OLAP_FIELD_TYPE_DECIMAL>();
 }
 
 } // namespace doris

@@ -30,6 +30,7 @@
 #include "olap/types.h"
 #include "olap/utils.h"
 #include "runtime/mem_pool.h"
+#include "runtime/tuple.h"
 #include "util/hash_util.hpp"
 #include "util/mem_util.hpp"
 #include "util/slice.h"
@@ -74,6 +75,11 @@ public:
 
     inline void agg_finalize(RowCursorCell* dst, MemPool* mem_pool) const {
         _agg_info->finalize(dst, mem_pool);
+    }
+
+    virtual void consume(RowCursorCell* dst, const RowCursorCell& src, MemPool* mem_pool,
+                         ObjectPool* agg_pool) const {
+        _agg_info->init(dst, reinterpret_cast<const char*>(src.cell_ptr()), src.is_null(), mem_pool, agg_pool);
     }
 
     virtual void consume(RowCursorCell* dst, const char* src, bool src_null, MemPool* mem_pool,
@@ -141,6 +147,18 @@ public:
             return l_null ? -1 : 1;
         }
         return l_null ? 0 : _type_info->cmp(lhs.cell_ptr(), rhs.cell_ptr());
+    }
+
+    int compare_cell(Tuple* lhs, SlotDescriptor* left_slot_desc,
+            Tuple* rhs, SlotDescriptor* right_slot_desc) const {
+        bool l_null = lhs->is_null(left_slot_desc->null_indicator_offset());
+        bool r_null = rhs->is_null(right_slot_desc->null_indicator_offset());
+        if (l_null != r_null) {
+            return l_null ? -1 : 1;
+        }
+
+        return l_null ? 0 : _type_info->cmp(lhs->get_slot(left_slot_desc->tuple_offset()),
+                rhs->get_slot(right_slot_desc->tuple_offset()));
     }
 
     // Used to compare short key index. Because short key will truncate

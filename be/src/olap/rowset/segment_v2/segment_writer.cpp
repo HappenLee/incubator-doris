@@ -37,7 +37,7 @@ const uint32_t k_segment_magic_length = 4;
 
 SegmentWriter::SegmentWriter(fs::WritableBlock* wblock, uint32_t segment_id,
                              const TabletSchema* tablet_schema, const SegmentWriterOptions& opts)
-        : _segment_id(segment_id), _tablet_schema(tablet_schema), _opts(opts), _wblock(wblock) {
+        : _segment_id(segment_id), _tablet_schema(tablet_schema), _schema(*_tablet_schema), _opts(opts), _wblock(wblock) {
     CHECK_NOTNULL(_wblock);
 }
 
@@ -114,6 +114,21 @@ Status SegmentWriter::append_row(const RowType& row) {
 
 template Status SegmentWriter::append_row(const RowCursor& row);
 template Status SegmentWriter::append_row(const ContiguousRow& row);
+
+Status SegmentWriter::append_row(const Tuple* tuple, const std::vector<SlotDescriptor*>& slot_descs) {
+    for (size_t cid = 0; cid < _column_writers.size(); ++cid) {
+        RETURN_IF_ERROR(_column_writers[cid]->append(tuple, slot_descs[cid]));
+    }
+
+    // At the begin of one block, so add a short key index entry
+    if ((_row_count % _opts.num_rows_per_block) == 0) {
+        std::string encoded_key;
+        encode_key(&encoded_key, tuple, slot_descs, _schema);
+        RETURN_IF_ERROR(_index_builder->add_item(encoded_key));
+    }
+    ++_row_count;
+    return Status::OK();
+}
 
 // TODO(lingbin): Currently this function does not include the size of various indexes,
 // We should make this more precise.

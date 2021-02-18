@@ -37,6 +37,7 @@
 #include "olap/row_cursor.h"
 #include "olap/rowset/rowset_reader.h"
 #include "olap/tablet.h"
+#include "runtime/tuple.h"
 #include "util/runtime_profile.h"
 
 namespace doris {
@@ -54,6 +55,7 @@ struct ReaderParams {
     ReaderType reader_type = READER_QUERY;
     bool aggregation = false;
     bool need_agg_finalize = true;
+    bool need_full_char = false;
     // 1. when read column data page:
     //     for compaction, schema_change, check_sum: we don't use page cache
     //     for query and config::disable_storage_page_cache is false, we use page cache
@@ -70,7 +72,13 @@ struct ReaderParams {
     std::vector<TCondition> conditions;
     // The ColumnData will be set when using Merger, eg Cumulative, BE.
     std::vector<RowsetReaderSharedPtr> rs_readers;
+    // return columns mean data from storage engine -> reader
     std::vector<uint32_t> return_columns;
+    // return column of tuple and query slot mean data from reader ->
+    // compaction, olap_scanner, md5_sum ... etc
+    std::vector<SlotDescriptor*> query_slots;
+    std::vector<uint32_t> return_columns_of_tuple;
+
     RuntimeProfile* profile = nullptr;
     RuntimeState* runtime_state = nullptr;
 
@@ -85,7 +93,7 @@ public:
     ~Reader();
 
     // Initialize Reader with tablet, data version and fetch range.
-    OLAPStatus init(const ReaderParams& read_params);
+    OLAPStatus init(ReaderParams& read_params);
 
     void close();
 
@@ -93,9 +101,9 @@ public:
     // Return OLAP_SUCCESS and set `*eof` to false when next row is read into `row_cursor`.
     // Return OLAP_SUCCESS and set `*eof` to true when no more rows can be read.
     // Return others when unexpected error happens.
-    OLAPStatus next_row_with_aggregation(RowCursor* row_cursor, MemPool* mem_pool,
+    OLAPStatus next_tuple_with_aggregation(Tuple* tuple, MemPool* mem_pool,
                                          ObjectPool* agg_pool, bool* eof) {
-        return (this->*_next_row_func)(row_cursor, mem_pool, agg_pool, eof);
+        return (this->*_next_tuple_func)(tuple, mem_pool, agg_pool, eof);
     }
 
     uint64_t merged_rows() const { return _merged_rows; }
@@ -122,7 +130,7 @@ private:
     friend class CollectIterator;
     friend class DeleteHandler;
 
-    OLAPStatus _init_params(const ReaderParams& read_params);
+    OLAPStatus _init_params(ReaderParams& read_params);
 
     OLAPStatus _capture_rs_readers(const ReaderParams& read_params);
 
@@ -164,11 +172,23 @@ private:
     OLAPStatus _unique_key_next_row(RowCursor* row_cursor, MemPool* mem_pool, ObjectPool* agg_pool,
                                     bool* eof);
 
+    OLAPStatus _direct_next_tuple(Tuple* tuple, MemPool* mem_pool, ObjectPool* agg_pool,
+                                bool* eof);
+    OLAPStatus _direct_agg_key_next_tuple(Tuple* tuple, MemPool* mem_pool,
+                                        ObjectPool* agg_pool, bool* eof);
+    OLAPStatus _agg_key_next_tuple(Tuple* tuple, MemPool* mem_pool, ObjectPool* agg_pool,
+                                 bool* eof);
+    OLAPStatus _unique_key_next_tuple(Tuple* tuple, MemPool* mem_pool, ObjectPool* agg_pool,
+                                    bool* eof);
+
     TabletSharedPtr tablet() { return _tablet; }
 
 private:
     std::shared_ptr<MemTracker> _tracker;
     std::unique_ptr<MemPool> _predicate_mem_pool;
+    std::vector<SlotDescriptor*> _query_slots;
+    std::vector<uint32_t> _return_columns_of_tuple;
+
     std::set<uint32_t> _load_bf_columns;
     std::vector<uint32_t> _return_columns;
     std::vector<uint32_t> _seek_columns;
@@ -184,18 +204,21 @@ private:
     std::vector<ColumnPredicate*> _value_col_predicates;
     DeleteHandler _delete_handler;
 
-    OLAPStatus (Reader::*_next_row_func)(RowCursor* row_cursor, MemPool* mem_pool,
+    void _convert_row_to_tuple(Tuple* tuple, const RowCursor& read_row_cursor);
+    OLAPStatus (Reader::*_next_tuple_func)(Tuple* tuple, MemPool* mem_pool,
                                          ObjectPool* agg_pool, bool* eof) = nullptr;
 
     bool _aggregation = false;
     // for agg query, we don't need to finalize when scan agg object data
     bool _need_agg_finalize = true;
+    bool _need_full_char = false;
     ReaderType _reader_type = READER_QUERY;
     bool _next_delete_flag = false;
     bool _filter_delete = false;
     bool _has_sequence_col = false;
     int32_t _sequence_col_idx = -1;
     const RowCursor* _next_key = nullptr;
+    RowCursor _read_row_cursor;
     std::unique_ptr<CollectIterator> _collect_iter;
     std::vector<uint32_t> _key_cids;
     std::vector<uint32_t> _value_cids;

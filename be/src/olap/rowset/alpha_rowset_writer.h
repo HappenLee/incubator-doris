@@ -37,6 +37,7 @@ public:
 
     OLAPStatus add_row(const RowCursor& row) override { return _add_row(row); }
     OLAPStatus add_row(const ContiguousRow& row) override { return _add_row(row); }
+    OLAPStatus add_row(const Tuple* tuple, const std::vector<SlotDescriptor*>& slot_descs) override { return _add_row(tuple, slot_descs); }
 
     // add rowset by create hard link
     OLAPStatus add_rowset(RowsetSharedPtr rowset) override;
@@ -60,6 +61,7 @@ private:
     template <typename RowType>
     OLAPStatus _add_row(const RowType& row);
 
+    OLAPStatus _add_row(const Tuple* tuple, const std::vector<SlotDescriptor*>& slot_descs);
     // validate rowset build arguments before create rowset to make sure correctness
     bool _validate_rowset();
 

@@ -24,6 +24,10 @@
 
 #include "common/status.h"
 #include "gen_cpp/segment_v2.pb.h"
+#include "olap/key_coder.h"
+#include "olap/schema.h"
+#include "runtime/tuple.h"
+#include "runtime/descriptors.h"
 #include "util/debug_util.h"
 #include "util/faststring.h"
 #include "util/slice.h"
@@ -103,6 +107,23 @@ void encode_key(std::string* buf, const RowType& row, size_t num_keys) {
         }
         buf->push_back(KEY_NORMAL_MARKER);
         row.schema()->column(cid)->encode_ascending(cell.cell_ptr(), buf);
+    }
+}
+
+template <bool null_first = true>
+void encode_key(std::string* buf, const Tuple* tuple, const std::vector<SlotDescriptor*>& slot_descs, const Schema& schema ) {
+    for (auto cid = 0; cid < schema.num_short_key_columns(); cid++) {
+        auto slot_desc = slot_descs[cid];
+        if (tuple->is_null(slot_desc->null_indicator_offset())) {
+            if (null_first) {
+                buf->push_back(KEY_NULL_FIRST_MARKER);
+            } else {
+                buf->push_back(KEY_NULL_LAST_MARKER);
+            }
+            continue;
+        }
+        buf->push_back(KEY_NORMAL_MARKER);
+        schema.column(cid)->encode_ascending(tuple->get_slot(slot_desc->tuple_offset()), buf);
     }
 }
 

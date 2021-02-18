@@ -23,6 +23,7 @@
 #include "gen_cpp/olap_file.pb.h"
 #include "olap/olap_define.h"
 #include "olap/types.h"
+#include "runtime/descriptors.h"
 
 namespace doris {
 
@@ -61,7 +62,6 @@ public:
 
     uint32_t get_subtype_count() const { return _sub_column_count; }
     const TabletColumn& get_sub_column(uint32_t i) const { return _sub_columns[i]; }
-
     friend bool operator==(const TabletColumn& a, const TabletColumn& b);
     friend bool operator!=(const TabletColumn& a, const TabletColumn& b);
 
@@ -118,6 +118,7 @@ public:
     int32_t field_index(const std::string& field_name) const;
     const TabletColumn& column(size_t ordinal) const;
     const std::vector<TabletColumn>& columns() const;
+    TupleDescriptor* get_tuple_desc(ObjectPool* pool) const;
     inline size_t num_columns() const { return _num_columns; }
     inline size_t num_key_columns() const { return _num_key_columns; }
     inline size_t num_null_columns() const { return _num_null_columns; }

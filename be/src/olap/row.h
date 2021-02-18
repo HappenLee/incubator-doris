@@ -133,16 +133,13 @@ void copy_row(DstRowType* dst, const SrcRowType& src, MemPool* pool) {
     }
 }
 
-// NOTE: only use in MemTable for now, it is same with copy_row(), but for HLL and Object type,
-// its content is in Slice->data, other than a normal Slice, so we just assign the Slice->data
-// pointer, instead of memcpy the data.
-// TODO(lingbin): remove this method
+// Deep copy other row's content into itself.
 template <typename DstRowType, typename SrcRowType>
-void copy_row_in_memtable(DstRowType* dst, const SrcRowType& src, MemPool* pool) {
+void copy_row(DstRowType* dst, SrcRowType& src, const std::vector<SlotDescriptor*>& slot_descs, MemPool* pool) {
     for (auto cid : dst->schema()->column_ids()) {
         auto dst_cell = dst->cell(cid);
-        auto src_cell = src.cell(cid);
-        dst->schema()->column(cid)->copy_object(&dst_cell, src_cell, pool);
+        auto src_cell = TupleRowCursorCell(src, slot_descs[cid]);
+        dst->schema()->column(cid)->deep_copy(&dst_cell, src_cell, pool);
     }
 }
 
@@ -153,6 +150,17 @@ void agg_update_row(DstRowType* dst, const SrcRowType& src, MemPool* mem_pool) {
         auto dst_cell = dst->cell(cid);
         auto src_cell = src.cell(cid);
         dst->schema()->column(cid)->agg_update(&dst_cell, src_cell, mem_pool);
+    }
+}
+
+template <typename RowType>
+void agg_update_tuple(Schema* schema, RowType* dst, const vector<SlotDescriptor*>& dst_slot_descs, const RowType* src,
+        const vector<SlotDescriptor*>& src_slot_descs, MemPool* mem_pool) {
+    for (uint32_t cid = schema->num_key_columns(); cid < schema->num_columns();
+         ++cid) {
+        TupleRowCursorCell dst_cell(dst, dst_slot_descs[cid]);
+        TupleRowCursorCell src_cell(const_cast<Tuple*>(src), src_slot_descs[cid]);
+        schema->column(cid)->agg_update(&dst_cell, src_cell, mem_pool);
     }
 }
 
@@ -213,10 +221,31 @@ void agg_finalize_row(RowType* row, MemPool* mem_pool) {
 }
 
 template <typename RowType>
+void agg_finalize_tuple(Schema* schema, RowType* dst, const vector<SlotDescriptor*>& dst_slot_descs, MemPool* mem_pool) {
+    for (uint32_t cid = schema->num_key_columns(); cid < schema->num_columns();
+         ++cid) {
+        TupleRowCursorCell dst_cell(dst, dst_slot_descs[cid]);
+        schema->column(cid)->agg_finalize(&dst_cell, mem_pool);
+    }
+}
+
+template <typename RowType>
 void agg_finalize_row(const std::vector<uint32_t>& ids, RowType* row, MemPool* mem_pool) {
     for (uint32_t id : ids) {
         auto cell = row->cell(id);
         row->schema()->column(id)->agg_finalize(&cell, mem_pool);
+    }
+}
+
+template <typename RowType>
+void init_tuple_in_load(RowType* tuple, const std::vector<std::pair<size_t, SlotDescriptor*>>& need_init_slot_desc,
+                                    Schema* schema, MemPool* table_mem_pool, ObjectPool* agg_object_pool) {
+    for (auto& index_slot_pair : need_init_slot_desc) {
+        auto index = index_slot_pair.first;
+        auto slot_desc = index_slot_pair.second;
+
+        TupleRowCursorCell src_cell(tuple, slot_desc);
+        schema->column(index)->consume(&src_cell, src_cell, table_mem_pool, agg_object_pool);
     }
 }
 

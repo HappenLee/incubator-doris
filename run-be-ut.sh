@@ -39,7 +39,7 @@ export DORIS_HOME=${ROOT}
 
 . ${DORIS_HOME}/env.sh
 
-PARALLEL=$[$(nproc)/4+1]
+PARALLEL=$[$(nproc)+1]
 
 # Check args
 usage() {

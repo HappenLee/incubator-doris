@@ -39,36 +39,52 @@ MemTable::MemTable(int64_t tablet_id, Schema* schema, const TabletSchema* tablet
           _tuple_desc(tuple_desc),
           _slot_descs(slot_descs),
           _keys_type(keys_type),
-          _row_comparator(_schema),
+          _row_comparator(_schema, *_slot_descs),
           _mem_tracker(MemTracker::CreateTracker(-1, "MemTable", parent_tracker)),
-          _buffer_mem_pool(new MemPool(_mem_tracker.get())),
           _table_mem_pool(new MemPool(_mem_tracker.get())),
           _schema_size(_schema->schema_size()),
           _skip_list(new Table(_row_comparator, _table_mem_pool.get(),
                                _keys_type == KeysType::DUP_KEYS)),
-          _rowset_writer(rowset_writer) {}
+          _rowset_writer(rowset_writer) {
+    // init the _need_init_slot_descs
+    if (_slot_descs != nullptr && !_slot_descs->empty()) {
+        for (int i = 0; i < _slot_descs->size(); ++i) {
+            auto slot_type = (*_slot_descs)[i]->type().type;
+            if (slot_type == TYPE_DECIMALV2 ||
+                slot_type == TYPE_DECIMAL ||
+                slot_type == TYPE_DATETIME ||
+                slot_type == TYPE_DATE ||
+                slot_type == TYPE_HLL ||
+                slot_type == TYPE_OBJECT)
+                _need_init_slot_descs.emplace_back(i, (*_slot_descs)[i]);
+        }
+    }
+}
 
 MemTable::~MemTable() {
     delete _skip_list;
 }
 
-MemTable::RowCursorComparator::RowCursorComparator(const Schema* schema) : _schema(schema) {}
+MemTable::TupleComparator::TupleComparator(const Schema* schema, const std::vector<SlotDescriptor*>& slot_descs) :
+    _schema(schema), _slot_descs(slot_descs) {}
 
-int MemTable::RowCursorComparator::operator()(const char* left, const char* right) const {
-    ContiguousRow lhs_row(_schema, left);
-    ContiguousRow rhs_row(_schema, right);
-    return compare_row(lhs_row, rhs_row);
+int MemTable::TupleComparator::operator()(const char* left, const char* right) const {
+    auto* left_tuple = (Tuple*) left;
+    auto* right_tuple = (Tuple*) right;
+
+    for (int i = 0; i < _schema->num_key_columns(); ++i) {
+        auto res = _schema->column(i)->compare_cell(left_tuple, _slot_descs[i], right_tuple, _slot_descs[i]);
+        if (res != 0) return res;
+    }
+    return 0;
 }
 
 void MemTable::insert(const Tuple* tuple) {
     bool overwritten = false;
-    uint8_t* _tuple_buf = nullptr;
     if (_keys_type == KeysType::DUP_KEYS) {
-        // Will insert directly, so use memory from _table_mem_pool
-        _tuple_buf = _table_mem_pool->allocate(_schema_size);
-        ContiguousRow row(_schema, _tuple_buf);
-        _tuple_to_row(tuple, &row, _table_mem_pool.get());
-        _skip_list->Insert((TableKey)_tuple_buf, &overwritten);
+//        // Will insert directly, so use memory from _table_mem_pool
+        auto* new_tuple = _init_copy_tuple_in_load(tuple);
+        _skip_list->Insert((TableKey)new_tuple, &overwritten);
         DCHECK(!overwritten) << "Duplicate key model meet overwrite in SkipList";
         return;
     }
@@ -77,44 +93,39 @@ void MemTable::insert(const Tuple* tuple) {
     // we first allocate from _buffer_mem_pool, and then check whether it already exists in
     // _skiplist.  If it exists, we aggregate the new row into the row in skiplist.
     // otherwise, we need to copy it into _table_mem_pool before we can insert it.
-    _tuple_buf = _buffer_mem_pool->allocate(_schema_size);
-    ContiguousRow src_row(_schema, _tuple_buf);
-    _tuple_to_row(tuple, &src_row, _buffer_mem_pool.get());
 
-    bool is_exist = _skip_list->Find((TableKey)_tuple_buf, &_hint);
+    // if there is no _need_init_solt which means we can use tuple directly. otherwise,
+    // we must init the tuple data before search it in the skip list
+    tuple = _need_init_slot_descs.empty() ? tuple : _init_copy_tuple_in_load(tuple);
+    bool is_exist = _skip_list->Find((TableKey)tuple, &_hint);
     if (is_exist) {
-        _aggregate_two_row(src_row, _hint.curr->key);
+        _aggregate_two_tuple(tuple, (Tuple*)_hint.curr->key);
     } else {
-        _tuple_buf = _table_mem_pool->allocate(_schema_size);
-        ContiguousRow dst_row(_schema, _tuple_buf);
-        copy_row_in_memtable(&dst_row, src_row, _table_mem_pool.get());
-        _skip_list->InsertWithHint((TableKey)_tuple_buf, is_exist, &_hint);
-    }
-
-    // Make MemPool to be reusable, but does not free its memory
-    _buffer_mem_pool->clear();
-}
-
-void MemTable::_tuple_to_row(const Tuple* tuple, ContiguousRow* row, MemPool* mem_pool) {
-    for (size_t i = 0; i < _slot_descs->size(); ++i) {
-        auto cell = row->cell(i);
-        const SlotDescriptor* slot = (*_slot_descs)[i];
-
-        bool is_null = tuple->is_null(slot->null_indicator_offset());
-        const void* value = tuple->get_slot(slot->tuple_offset());
-        _schema->column(i)->consume(&cell, (const char*)value, is_null, mem_pool,
-                                    &_agg_object_pool);
+        // if there is _need_init_slot_descs means tuple had init and copy, no need copy again
+        auto* new_tuple = _need_init_slot_descs.empty() ? _init_copy_tuple_in_load(tuple) : tuple;
+        _skip_list->InsertWithHint((TableKey)new_tuple, false, &_hint);
     }
 }
 
-void MemTable::_aggregate_two_row(const ContiguousRow& src_row, TableKey row_in_skiplist) {
-    ContiguousRow dst_row(_schema, row_in_skiplist);
+void MemTable::_aggregate_two_tuple(const Tuple* tuple, Tuple* tuple_in_skiplist) {
     if (_tablet_schema->has_sequence_col()) {
-        agg_update_row_with_sequence(&dst_row, src_row, _tablet_schema->sequence_col_idx(),
-                                     _table_mem_pool.get());
-    } else {
-        agg_update_row(&dst_row, src_row, _table_mem_pool.get());
+        auto sequence_idx = _tablet_schema->sequence_col_idx();
+        TupleRowCursorCell src_cell(const_cast<Tuple*>(tuple), (*_slot_descs)[sequence_idx]);
+        TupleRowCursorCell dst_cell(tuple_in_skiplist, (*_slot_descs)[sequence_idx]);
+        auto res = _schema->column(sequence_idx)->compare_cell(dst_cell, src_cell);
+        // dst sequence column larger than src, don't need to update
+        if (res > 0) {
+            return;
+        }
     }
+    agg_update_tuple(_schema, tuple_in_skiplist, *_slot_descs, tuple, *_slot_descs, _table_mem_pool.get());
+}
+
+Tuple* MemTable::_init_copy_tuple_in_load(const Tuple *tuple) {
+    auto* new_tuple = const_cast<Tuple*>(tuple)->deep_copy(*_tuple_desc, _table_mem_pool.get());
+    init_tuple_in_load(new_tuple, _need_init_slot_descs, _schema,
+            _table_mem_pool.get(), &_agg_object_pool);
+    return new_tuple;
 }
 
 OLAPStatus MemTable::flush() {
@@ -127,10 +138,9 @@ OLAPStatus MemTable::flush() {
             // Flush the memtable like the old way.
             Table::Iterator it(_skip_list);
             for (it.SeekToFirst(); it.Valid(); it.Next()) {
-                char* row = (char*)it.key();
-                ContiguousRow dst_row(_schema, row);
-                agg_finalize_row(&dst_row, _table_mem_pool.get());
-                RETURN_NOT_OK(_rowset_writer->add_row(dst_row));
+                const auto *tuple = (const Tuple *) it.key();
+                agg_finalize_tuple(_schema, const_cast<Tuple *>(tuple), *_slot_descs, _table_mem_pool.get());
+                RETURN_NOT_OK(_rowset_writer->add_row(tuple, *_slot_descs));
             }
             RETURN_NOT_OK(_rowset_writer->flush());
         } else {
@@ -163,11 +173,11 @@ void MemTable::Iterator::next() {
     _it.Next();
 }
 
-ContiguousRow MemTable::Iterator::get_current_row() {
-    char* row = (char*) _it.key();
-    ContiguousRow dst_row(_mem_table->_schema, row);
-    agg_finalize_row(&dst_row, _mem_table->_table_mem_pool.get());
-    return dst_row;
+Tuple* MemTable::Iterator::get_current_tuple() {
+    auto tuple = (Tuple *) _it.key();
+    agg_finalize_tuple(_mem_table->_schema, tuple, *_mem_table->_slot_descs,
+            _mem_table->_table_mem_pool.get());
+    return tuple;
 }
 
 } // namespace doris

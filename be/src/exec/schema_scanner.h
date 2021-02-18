@@ -81,6 +81,8 @@ public:
     static void set_doris_server(DorisServer* doris_server) { _s_doris_server = doris_server; }
 
 protected:
+    friend class TabletSchema;
+
     Status create_tuple_desc(ObjectPool* pool);
 
     bool _is_init;

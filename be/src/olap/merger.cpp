@@ -22,6 +22,7 @@
 
 #include "olap/olap_define.h"
 #include "olap/reader.h"
+#include "olap/row.h"
 #include "olap/row_cursor.h"
 #include "olap/tablet.h"
 #include "util/trace.h"
@@ -40,17 +41,38 @@ OLAPStatus Merger::merge_rowsets(TabletSharedPtr tablet, ReaderType reader_type,
     reader_params.reader_type = reader_type;
     reader_params.rs_readers = src_rowset_readers;
     reader_params.version = dst_rowset_writer->version();
-    RETURN_NOT_OK(reader.init(reader_params));
-
-    RowCursor row_cursor;
-    RETURN_NOT_OK_LOG(
-            row_cursor.init(tablet->tablet_schema()),
-            "failed to init row cursor when merging rowsets of tablet " + tablet->full_name());
-    row_cursor.allocate_memory_for_string_type(tablet->tablet_schema());
+    reader_params.need_full_char = true;
 
     std::shared_ptr<MemTracker> tracker(new MemTracker(-1));
     std::unique_ptr<MemPool> mem_pool(new MemPool(tracker.get()));
+    std::unique_ptr<ObjectPool> agg_object_pool(new ObjectPool());
 
+    // There not set return column means all column in tablet schema
+    // it's a little confuse here, need to refactor the code in reader in the furture
+    for (uint32_t i = 0; i < tablet->tablet_schema().num_columns(); ++i) {
+        reader_params.return_columns_of_tuple.push_back(i);
+    }
+
+    // build the tuple desc and tuple, init the solt need to init vec
+    Schema schema(tablet->tablet_schema());
+    auto tuple_desc = tablet->tablet_schema().get_tuple_desc(agg_object_pool.get());
+    reader_params.query_slots = tuple_desc->slots();
+    Tuple* tuple = Tuple::create(tuple_desc->byte_size(), mem_pool.get());
+    const auto& slot_descs = tuple_desc->slots();
+    std::vector<std::pair<size_t, SlotDescriptor*>> need_init_slot_descs;
+    for (int i = 0; i < slot_descs.size(); ++i) {
+        auto slot_type = slot_descs[i]->type().type;
+        if (slot_type == TYPE_DECIMALV2 ||
+            slot_type == TYPE_DECIMAL ||
+            slot_type == TYPE_DATETIME ||
+            slot_type == TYPE_DATE) {
+            need_init_slot_descs.emplace_back(i, slot_descs[i]);
+        }
+    }
+
+    RETURN_NOT_OK(reader.init(reader_params));
+
+    std::unique_ptr<MemPool> reader_mem_pool(new MemPool(tracker.get()));
     // The following procedure would last for long time, half of one day, etc.
     int64_t output_rows = 0;
     while (true) {
@@ -58,13 +80,15 @@ OLAPStatus Merger::merge_rowsets(TabletSharedPtr tablet, ReaderType reader_type,
         bool eof = false;
         // Read one row into row_cursor
         RETURN_NOT_OK_LOG(
-                reader.next_row_with_aggregation(&row_cursor, mem_pool.get(), &objectPool, &eof),
+                reader.next_tuple_with_aggregation(tuple, reader_mem_pool.get(), &objectPool, &eof),
                 "failed to read next row when merging rowsets of tablet " + tablet->full_name());
         if (eof) {
             break;
         }
+
+        init_tuple_in_load(tuple, need_init_slot_descs, &schema, reader_mem_pool.get(), &objectPool);
         RETURN_NOT_OK_LOG(
-                dst_rowset_writer->add_row(row_cursor),
+                dst_rowset_writer->add_row(tuple, slot_descs),
                 "failed to write row when merging rowsets of tablet " + tablet->full_name());
         output_rows++;
         LOG_IF(INFO, config::row_step_for_compaction_merge_log != 0 &&

@@ -31,6 +31,8 @@ namespace segment_v2 {
 class SegmentWriter;
 } // namespace segment_v2
 
+class Tuple;
+
 class BetaRowsetWriter : public RowsetWriter {
 public:
     BetaRowsetWriter();
@@ -42,6 +44,10 @@ public:
     OLAPStatus add_row(const RowCursor& row) override { return _add_row(row); }
     // For Memtable::flush()
     OLAPStatus add_row(const ContiguousRow& row) override { return _add_row(row); }
+
+    OLAPStatus add_row(const Tuple* tuple, const std::vector<SlotDescriptor*>& slot_descs) override {
+        return _add_row(tuple, slot_descs);
+    }
 
     // add rowset by create hard link
     OLAPStatus add_rowset(RowsetSharedPtr rowset) override;
@@ -67,6 +73,8 @@ private:
     OLAPStatus _add_row(const RowType& row);
 
     OLAPStatus _create_segment_writer(std::unique_ptr<segment_v2::SegmentWriter>* writer);
+
+    OLAPStatus _add_row(const Tuple* tuple, const std::vector<SlotDescriptor*>& slot_descs);
 
     OLAPStatus _flush_segment_writer(std::unique_ptr<segment_v2::SegmentWriter>* writer);
 
