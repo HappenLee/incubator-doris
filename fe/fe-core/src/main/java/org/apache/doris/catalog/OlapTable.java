@@ -863,6 +863,10 @@ public class OlapTable extends Table {
         this.indexes.setIndexes(indexes);
     }
 
+    public boolean isColocateTable() {
+        return colocateGroup != null;
+    }
+
     public String getColocateGroup() {
         return colocateGroup;
     }
