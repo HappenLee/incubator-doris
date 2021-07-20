@@ -122,7 +122,7 @@ struct TypeEncodingTraits<type, DICT_ENCODING, Slice> {
 
 template <>
 struct TypeEncodingTraits<OLAP_FIELD_TYPE_DATE, FOR_ENCODING,
-                          typename CppTypeTraits<OLAP_FIELD_TYPE_DATE>::CppType> {
+                          typename CppTypeTraits<OLAP_FIELD_TYPE_DATE>::OriginCppType> {
     static Status create_page_builder(const PageBuilderOptions& opts, PageBuilder** builder) {
         *builder = new FrameOfReferencePageBuilder<OLAP_FIELD_TYPE_DATE>(opts);
         return Status::OK();
@@ -130,6 +130,20 @@ struct TypeEncodingTraits<OLAP_FIELD_TYPE_DATE, FOR_ENCODING,
     static Status create_page_decoder(const Slice& data, const PageDecoderOptions& opts,
                                       PageDecoder** decoder) {
         *decoder = new FrameOfReferencePageDecoder<OLAP_FIELD_TYPE_DATE>(data, opts);
+        return Status::OK();
+    }
+};
+
+template <>
+struct TypeEncodingTraits<OLAP_FIELD_TYPE_DATETIME, FOR_ENCODING,
+                          typename CppTypeTraits<OLAP_FIELD_TYPE_DATETIME>::OriginCppType> {
+    static Status create_page_builder(const PageBuilderOptions& opts, PageBuilder** builder) {
+        *builder = new FrameOfReferencePageBuilder<OLAP_FIELD_TYPE_DATETIME>(opts);
+        return Status::OK();
+    }
+    static Status create_page_decoder(const Slice& data, const PageDecoderOptions& opts,
+                                      PageDecoder** decoder) {
+        *decoder = new FrameOfReferencePageDecoder<OLAP_FIELD_TYPE_DATETIME>(data, opts);
         return Status::OK();
     }
 };
@@ -163,7 +177,8 @@ struct TypeEncodingTraits<type, PREFIX_ENCODING, Slice> {
 
 template <FieldType field_type, EncodingTypePB encoding_type>
 struct EncodingTraits : TypeEncodingTraits<field_type, encoding_type,
-                                           typename CppTypeTraits<field_type>::CppType> {
+                                           std::conditional_t<std::is_same_v<typename CppTypeTraits<field_type>::OriginCppType, void>,
+                                           typename CppTypeTraits<field_type>::CppType, typename CppTypeTraits<field_type>::OriginCppType>> {
     static const FieldType type = field_type;
     static const EncodingTypePB encoding = encoding_type;
 };

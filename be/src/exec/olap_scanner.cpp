@@ -459,27 +459,27 @@ void OlapScanner::_convert_row_to_tuple(Tuple* tuple) {
             }
             break;
         }
-        case TYPE_DATETIME: {
-            DateTimeValue* slot = tuple->get_datetime_slot(slot_desc->tuple_offset());
-            uint64_t value = *reinterpret_cast<uint64_t*>(ptr);
-            if (!slot->from_olap_datetime(value)) {
-                tuple->set_null(slot_desc->null_indicator_offset());
-            }
-            break;
-        }
-        case TYPE_DATE: {
-            DateTimeValue* slot = tuple->get_datetime_slot(slot_desc->tuple_offset());
-            uint64_t value = 0;
-            value = *(unsigned char*)(ptr + 2);
-            value <<= 8;
-            value |= *(unsigned char*)(ptr + 1);
-            value <<= 8;
-            value |= *(unsigned char*)(ptr);
-            if (!slot->from_olap_date(value)) {
-                tuple->set_null(slot_desc->null_indicator_offset());
-            }
-            break;
-        }
+//        case TYPE_DATETIME: {
+//            DateTimeValue* slot = tuple->get_datetime_slot(slot_desc->tuple_offset());
+//            uint64_t value = *reinterpret_cast<DateTimeValue*>(ptr);
+//            if (!slot->from_olap_datetime(value)) {
+//                tuple->set_null(slot_desc->null_indicator_offset());
+//            }
+//            break;
+//        }
+//        case TYPE_DATE: {
+//            DateTimeValue* slot = tuple->get_datetime_slot(slot_desc->tuple_offset());
+//            uint64_t value = 0;
+//            value = *(unsigned char*)(ptr + 2);
+//            value <<= 8;
+//            value |= *(unsigned char*)(ptr + 1);
+//            value <<= 8;
+//            value |= *(unsigned char*)(ptr);
+//            if (!slot->from_olap_date(value)) {
+//                tuple->set_null(slot_desc->null_indicator_offset());
+//            }
+//            break;
+//        }
         case TYPE_ARRAY: {
             CollectionValue* array_v = reinterpret_cast<CollectionValue*>(ptr);
             CollectionValue* slot = tuple->get_collection_slot(slot_desc->tuple_offset());

@@ -35,6 +35,7 @@
 #include "runtime/collection_value.h"
 #include "runtime/datetime_value.h"
 #include "runtime/mem_pool.h"
+#include "runtime/type_limit.h"
 #include "util/hash_util.hpp"
 #include "util/mem_util.hpp"
 #include "util/slice.h"
@@ -368,90 +369,151 @@ static const std::vector<std::string> DATE_FORMATS {
 };
 
 template <FieldType field_type>
-struct CppTypeTraits {};
+struct CppTypeTraits {
+};
 
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_BOOL> {
     using CppType = bool;
     using UnsignedCppType = bool;
+
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_TINYINT> {
     using CppType = int8_t;
     using UnsignedCppType = uint8_t;
+
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_SMALLINT> {
     using CppType = int16_t;
     using UnsignedCppType = uint16_t;
+
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_INT> {
     using CppType = int32_t;
     using UnsignedCppType = uint32_t;
+
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_UNSIGNED_INT> {
     using CppType = uint32_t;
     using UnsignedCppType = uint32_t;
+
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_BIGINT> {
     using CppType = int64_t;
     using UnsignedCppType = uint64_t;
+
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_UNSIGNED_BIGINT> {
     using CppType = uint64_t;
     using UnsignedCppType = uint64_t;
+
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_LARGEINT> {
     using CppType = int128_t;
     using UnsignedCppType = unsigned int128_t;
+
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_FLOAT> {
     using CppType = float;
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_DOUBLE> {
     using CppType = double;
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_DECIMAL> {
     using CppType = decimal12_t;
     using UnsignedCppType = decimal12_t;
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_DATE> {
-    using CppType = uint24_t;
-    using UnsignedCppType = uint24_t;
+    using CppType = DateTimeValue;
+    using UnsignedCppType = DateTimeValue;
+
+    using OriginCppType = uint24_t;
+    using OriginUnsignedCppType = uint24_t;
+
+    static OriginCppType to_origin_type(CppType date_time) {
+        return static_cast<int64_t>(date_time.to_olap_date());
+    }
+
+    static CppType to_new_type(OriginUnsignedCppType dtime) {
+        uint64_t value = 0;
+
+        unsigned char* ptr = reinterpret_cast<unsigned char*>(&dtime);
+        value = *(unsigned char*)(ptr + 2);
+        value <<= 8;
+        value |= *(unsigned char*)(ptr + 1);
+        value <<= 8;
+        value |= *(unsigned char*)(ptr);
+
+        DateTimeValue dt;
+        dt.from_olap_date(dtime);
+        return dt;
+    }
 };
+
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_DATETIME> {
-    using CppType = int64_t;
-    using UnsignedCppType = uint64_t;
+    using CppType = DateTimeValue;
+    using UnsignedCppType = DateTimeValue;
+
+    using OriginCppType = int64_t;
+    using OriginUnsignedCppType = uint64_t ;
+
+    static OriginUnsignedCppType to_origin_type(CppType date_time) {
+        return date_time.to_olap_datetime();
+    }
+
+    static CppType to_new_type(OriginUnsignedCppType dtime) {
+        DateTimeValue dt;
+        dt.from_olap_datetime(dtime);
+        return dt;
+    }
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_CHAR> {
     using CppType = Slice;
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_VARCHAR> {
     using CppType = Slice;
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_HLL> {
     using CppType = Slice;
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_OBJECT> {
     using CppType = Slice;
+    using OriginCppType = void;
 };
 template <>
 struct CppTypeTraits<OLAP_FIELD_TYPE_ARRAY> {
     using CppType = CollectionValue;
+    using OriginCppType = void;
 };
 
 template <FieldType field_type>
@@ -498,11 +560,11 @@ struct BaseFieldtypeTraits : public CppTypeTraits<field_type> {
     }
 
     static inline void set_to_max(void* buf) {
-        *reinterpret_cast<CppType*>(buf) = std::numeric_limits<CppType>::max();
+        *reinterpret_cast<CppType*>(buf) = type_limit<CppType>::max();
     }
 
     static inline void set_to_min(void* buf) {
-        *reinterpret_cast<CppType*>(buf) = std::numeric_limits<CppType>::min();
+        *reinterpret_cast<CppType*>(buf) = type_limit<CppType>::min();
     }
 
     static inline uint32_t hash_code(const void* data, uint32_t seed) {
@@ -523,6 +585,10 @@ struct BaseFieldtypeTraits : public CppTypeTraits<field_type> {
         *reinterpret_cast<CppType*>(buf) = value;
         return OLAP_SUCCESS;
     }
+
+    static void convert_to_origin_type(char* dest, const char* src, size_t size) {};
+
+    static void convert_to_new_type(char* dest, const char* src, size_t size) {};
 };
 
 static void prepare_char_before_convert(const void* src) {
@@ -805,48 +871,36 @@ struct FieldTypeTraits<OLAP_FIELD_TYPE_DECIMAL>
 template <>
 struct FieldTypeTraits<OLAP_FIELD_TYPE_DATE> : public BaseFieldtypeTraits<OLAP_FIELD_TYPE_DATE> {
     static OLAPStatus from_string(void* buf, const std::string& scan_key) {
-        tm time_tm;
-        char* res = strptime(scan_key.c_str(), "%Y-%m-%d", &time_tm);
-
-        if (NULL != res) {
-            int value = (time_tm.tm_year + 1900) * 16 * 32 + (time_tm.tm_mon + 1) * 32 +
-                        time_tm.tm_mday;
-            *reinterpret_cast<CppType*>(buf) = value;
-        } else {
-            // 1400 - 01 - 01
-            *reinterpret_cast<CppType*>(buf) = 716833;
+        // 1400 - 01 - 01
+        if (!reinterpret_cast<CppType*>(buf)->from_date_format_str("%Y-%m-%d",
+                8, scan_key.c_str(), scan_key.size())) {
+            reinterpret_cast<CppType*>(buf)->set_time(1400, 01, 01, 0, 0, 0, 0);
         }
-
         return OLAP_SUCCESS;
     }
+
     static std::string to_string(const void* src) {
-        return reinterpret_cast<const CppType*>(src)->to_string();
+        char date[32];
+        reinterpret_cast<const CppType*>(src)->to_string(date);
+        return std::string(date);
     }
+
     static OLAPStatus convert_from(void* dest, const void* src, const TypeInfo* src_type,
                                    MemPool* mem_pool) {
         if (src_type->type() == FieldType::OLAP_FIELD_TYPE_DATETIME) {
             using SrcType = typename CppTypeTraits<OLAP_FIELD_TYPE_DATETIME>::CppType;
             SrcType src_value = *reinterpret_cast<const SrcType*>(src);
-            //only need part one
-            SrcType part1 = (src_value / 1000000L);
-            CppType year = static_cast<CppType>((part1 / 10000L) % 10000);
-            CppType mon = static_cast<CppType>((part1 / 100) % 100);
-            CppType mday = static_cast<CppType>(part1 % 100);
-            *reinterpret_cast<CppType*>(dest) = (year << 9) + (mon << 5) + mday;
+            *reinterpret_cast<CppType*>(dest) = src_value;
+            reinterpret_cast<CppType*>(dest)->cast_to_date();
             return OLAPStatus::OLAP_SUCCESS;
         }
 
         if (src_type->type() == FieldType::OLAP_FIELD_TYPE_INT) {
             using SrcType = typename CppTypeTraits<OLAP_FIELD_TYPE_INT>::CppType;
             SrcType src_value = *reinterpret_cast<const SrcType*>(src);
-            DateTimeValue dt;
-            if (!dt.from_date_int64(src_value)) {
+            if (!reinterpret_cast<CppType*>(dest)->from_date_int64(src_value)) {
                 return OLAPStatus::OLAP_ERR_INVALID_SCHEMA;
             }
-            CppType year = static_cast<CppType>(src_value / 10000);
-            CppType month = static_cast<CppType>((src_value % 10000) / 100);
-            CppType day = static_cast<CppType>(src_value % 100);
-            *reinterpret_cast<CppType*>(dest) = (year << 9) + (month << 5) + day;
             return OLAPStatus::OLAP_SUCCESS;
         }
 
@@ -857,12 +911,9 @@ struct FieldTypeTraits<OLAP_FIELD_TYPE_DATE> : public BaseFieldtypeTraits<OLAP_F
             }
             using SrcType = typename CppTypeTraits<OLAP_FIELD_TYPE_VARCHAR>::CppType;
             auto src_value = *reinterpret_cast<const SrcType*>(src);
-            DateTimeValue dt;
             for (const auto& format : DATE_FORMATS) {
-                if (dt.from_date_format_str(format.c_str(), format.length(), src_value.get_data(),
+                if (reinterpret_cast<CppType*>(dest)->from_date_format_str(format.c_str(), format.length(), src_value.get_data(),
                                             src_value.get_size())) {
-                    *reinterpret_cast<CppType*>(dest) =
-                            (dt.year() << 9) + (dt.month() << 5) + dt.day();
                     return OLAPStatus::OLAP_SUCCESS;
                 }
             }
@@ -871,73 +922,80 @@ struct FieldTypeTraits<OLAP_FIELD_TYPE_DATE> : public BaseFieldtypeTraits<OLAP_F
 
         return OLAPStatus::OLAP_ERR_INVALID_SCHEMA;
     }
+
     static void set_to_max(void* buf) {
         // max is 9999 * 16 * 32 + 12 * 32 + 31;
-        *reinterpret_cast<CppType*>(buf) = 5119903;
+        reinterpret_cast<CppType*>(buf)->set_time(9999, 12, 31, 0, 0, 0, 0);
     }
     static void set_to_min(void* buf) {
-        // min is 0 * 16 * 32 + 1 * 32 + 1;
-        *reinterpret_cast<CppType*>(buf) = 33;
+        // min is 0 * 16 * 32 + 0 * 32 + 0;
+        reinterpret_cast<CppType*>(buf)->set_time(0, 0, 0, 0, 0, 0, 0);
     }
+
+    static void convert_to_origin_type(char* dest, const char* src, size_t size) {
+        auto data = (uint24_t*) dest;
+        auto buf = (const DateTimeValue*) src;
+
+        for (int i = 0; i < size; ++i) {
+            data[i] = CppTypeTraits<OLAP_FIELD_TYPE_DATE>::to_origin_type(buf[i]);
+        }
+    };
+
+    static void convert_to_new_type(char* dest, const char* src, size_t size) {
+        auto data = (DateTimeValue*) dest;
+        auto buf = (const uint24_t*) src;
+
+        for (int i = 0; i < size; ++i) {
+            data[i] = CppTypeTraits<OLAP_FIELD_TYPE_DATE>::to_new_type(buf[i]);
+        }
+    };
 };
 
 template <>
 struct FieldTypeTraits<OLAP_FIELD_TYPE_DATETIME>
         : public BaseFieldtypeTraits<OLAP_FIELD_TYPE_DATETIME> {
     static OLAPStatus from_string(void* buf, const std::string& scan_key) {
-        tm time_tm;
-        char* res = strptime(scan_key.c_str(), "%Y-%m-%d %H:%M:%S", &time_tm);
-
-        if (NULL != res) {
-            CppType value = ((time_tm.tm_year + 1900) * 10000L + (time_tm.tm_mon + 1) * 100L +
-                             time_tm.tm_mday) *
-                                    1000000L +
-                            time_tm.tm_hour * 10000L + time_tm.tm_min * 100L + time_tm.tm_sec;
-            *reinterpret_cast<CppType*>(buf) = value;
-        } else {
-            // 1400 - 01 - 01
-            *reinterpret_cast<CppType*>(buf) = 14000101000000L;
+        if (!reinterpret_cast<CppType*>(buf)->from_date_format_str("%Y-%m-%d %H:%M:%S",
+                19, scan_key.c_str(), scan_key.size())) {
+            reinterpret_cast<CppType*>(buf)->set_time(1400, 01, 01, 0, 0, 0, 0);
         }
-
         return OLAP_SUCCESS;
     }
+
     static std::string to_string(const void* src) {
-        tm time_tm;
-        CppType tmp = *reinterpret_cast<const CppType*>(src);
-        CppType part1 = (tmp / 1000000L);
-        CppType part2 = (tmp - part1 * 1000000L);
-
-        time_tm.tm_year = static_cast<int>((part1 / 10000L) % 10000) - 1900;
-        time_tm.tm_mon = static_cast<int>((part1 / 100) % 100) - 1;
-        time_tm.tm_mday = static_cast<int>(part1 % 100);
-
-        time_tm.tm_hour = static_cast<int>((part2 / 10000L) % 10000);
-        time_tm.tm_min = static_cast<int>((part2 / 100) % 100);
-        time_tm.tm_sec = static_cast<int>(part2 % 100);
-
-        char buf[20] = {'\0'};
-        strftime(buf, 20, "%Y-%m-%d %H:%M:%S", &time_tm);
+        char buf[32];
+        reinterpret_cast<const CppType*>(src)->to_string(buf);
         return std::string(buf);
     }
+
     static OLAPStatus convert_from(void* dest, const void* src, const TypeInfo* src_type,
                                    MemPool* memPool) {
         // when convert date to datetime, automatic padding zero
         if (src_type->type() == FieldType::OLAP_FIELD_TYPE_DATE) {
-            using SrcType = typename CppTypeTraits<OLAP_FIELD_TYPE_DATE>::CppType;
-            auto value = *reinterpret_cast<const SrcType*>(src);
-            int day = static_cast<int>(value & 31);
-            int mon = static_cast<int>(value >> 5 & 15);
-            int year = static_cast<int>(value >> 9);
-            *reinterpret_cast<CppType*>(dest) = (year * 10000L + mon * 100L + day) * 1000000;
+            memcpy(dest, src, sizeof(CppTypeTraits<OLAP_FIELD_TYPE_DATE>::CppType));
+            reinterpret_cast<CppType*>(dest)->to_datetime();
             return OLAPStatus::OLAP_SUCCESS;
         }
         return OLAPStatus::OLAP_ERR_INVALID_SCHEMA;
     }
-    static void set_to_max(void* buf) {
-        // 设置为最大时间，其含义为：9999-12-31 23:59:59
-        *reinterpret_cast<CppType*>(buf) = 99991231235959L;
-    }
-    static void set_to_min(void* buf) { *reinterpret_cast<CppType*>(buf) = 101000000; }
+
+    static void convert_to_origin_type(char* dest, const char* src, size_t size) {
+        auto data = (uint64_t*) dest;
+        auto buf = (const DateTimeValue*) src;
+
+        for (int i = 0; i < size; ++i) {
+            data[i] = CppTypeTraits<OLAP_FIELD_TYPE_DATETIME>::to_origin_type(buf[i]);
+        }
+    };
+
+    static void convert_to_new_type(char* dest, const char* src, size_t size) {
+        auto data = (DateTimeValue*) dest;
+        auto buf = (const uint64_t*) src;
+
+        for (int i = 0; i < size; ++i) {
+            data[i] = CppTypeTraits<OLAP_FIELD_TYPE_DATETIME>::to_new_type(buf[i]);
+        }
+    };
 };
 
 template <>

@@ -218,7 +218,7 @@ public:
         return OLAP_SUCCESS;
     }
 
-    OLAPStatus write_batch(RowBlock* block, RowCursor* cursor) override {
+    virtual OLAPStatus write_batch(RowBlock* block, RowCursor* cursor) override {
         for (uint32_t i = 0; i < block->row_block_info().row_num; i++) {
             block->get_row(i, cursor);
             OLAPStatus res = ColumnWriter::write(cursor);
@@ -275,7 +275,7 @@ public:
         _writer.record_position(index_entry());
     }
 
-private:
+protected:
     IntegerColumnWriter _writer;
 
     DISALLOW_COPY_AND_ASSIGN(IntegerColumnWriterWrapper);
@@ -484,11 +484,43 @@ private:
     DISALLOW_COPY_AND_ASSIGN(FixLengthStringColumnWriter);
 };
 
-// Date是三字节整数
-typedef IntegerColumnWriterWrapper<uint24_t, false> DateColumnWriter;
+template <FieldType T>
+class TimeColumnWriter : public IntegerColumnWriterWrapper<typename CppTypeTraits<T>::OriginUnsignedCppType, false> {
+public:
+    using super = IntegerColumnWriterWrapper<typename CppTypeTraits<T>::OriginUnsignedCppType, false>;
+    TimeColumnWriter(uint32_t column_id, OutStreamFactory* stream_factory,
+            const TabletColumn& column, size_t num_rows_per_row_block, double bf_fpp)
+            : IntegerColumnWriterWrapper<typename CppTypeTraits<T>::OriginUnsignedCppType, false>(column_id, stream_factory, column, num_rows_per_row_block, bf_fpp) {}
 
-// DateTime是用int64实现的
-typedef IntegerColumnWriterWrapper<uint64_t, false> DateTimeColumnWriter;
+    ~TimeColumnWriter() override = default;
+
+    OLAPStatus write_batch(RowBlock* block, RowCursor* cursor) override {
+        for (uint32_t i = 0; i < block->row_block_info().row_num; i++) {
+            block->get_row(i, cursor);
+            OLAPStatus res = ColumnWriter::write(cursor);
+            if (OLAP_UNLIKELY(OLAP_SUCCESS != res)) {
+                OLAP_LOG_WARNING("fail to write ColumnWriter. [res=%d]", res);
+                return res;
+            }
+
+            auto cell = cursor->cell(super::column_id());
+            super::_block_statistics.add(cell);
+            if (!cell.is_null()) {
+                DateTimeValue value = *reinterpret_cast<const DateTimeValue*>(cell.cell_ptr());
+                typename CppTypeTraits<T>::OriginUnsignedCppType storage_date_value = static_cast<int64_t>(value.to_olap_date());
+                res = super::_writer.write(static_cast<decltype(storage_date_value)>(storage_date_value));
+                if (res != OLAP_SUCCESS) {
+                    LOG(WARNING) << "fail to write integer, res=" << res;
+                    return res;
+                }
+            }
+        }
+        return OLAP_SUCCESS;
+    }
+};
+
+using DateColumnWriter = TimeColumnWriter<OLAP_FIELD_TYPE_DATE>;
+using DateTimeColumnWriter = TimeColumnWriter<OLAP_FIELD_TYPE_DATETIME>;
 
 class DecimalColumnWriter : public ColumnWriter {
 public:

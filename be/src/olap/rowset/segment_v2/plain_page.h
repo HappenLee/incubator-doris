@@ -49,8 +49,22 @@ public:
         }
         size_t old_size = _buffer.size();
         _buffer.resize(old_size + *count * SIZE_OF_TYPE);
-        memcpy(&_buffer[old_size], vals, *count * SIZE_OF_TYPE);
-        _count += *count;
+
+        auto to_add = *count;
+        if constexpr (Type == OLAP_FIELD_TYPE_DATE) {
+            uint24_t buf[to_add];
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATE>::convert_to_origin_type(
+                    reinterpret_cast<char *>(buf), reinterpret_cast<const char *>(vals), to_add);
+            memcpy(&_buffer[old_size], buf, to_add * SIZE_OF_TYPE);
+        } else if constexpr (Type == OLAP_FIELD_TYPE_DATETIME) {
+            uint64_t buf[to_add];
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATETIME>::convert_to_origin_type(
+                    reinterpret_cast<char *>(buf), reinterpret_cast<const char *>(vals), to_add);
+            memcpy(&_buffer[old_size], buf, to_add * SIZE_OF_TYPE);
+        } else {
+            memcpy(&_buffer[old_size], vals, to_add * SIZE_OF_TYPE);
+        }
+        _count += to_add;
         return Status::OK();
     }
 
@@ -92,11 +106,15 @@ public:
     }
 
 private:
+    using CppType = std::conditional_t<Type != OLAP_FIELD_TYPE_DATE && Type != OLAP_FIELD_TYPE_DATETIME,
+          typename TypeTraits<Type>::CppType, typename CppTypeTraits<Type>::OriginCppType>;
+
+    static constexpr auto SIZE_OF_TYPE = Type != OLAP_FIELD_TYPE_DATE && Type != OLAP_FIELD_TYPE_DATETIME ?
+            TypeTraits<Type>::size : sizeof(typename CppTypeTraits<Type>::OriginCppType);
+
     faststring _buffer;
     PageBuilderOptions _options;
     size_t _count;
-    typedef typename TypeTraits<Type>::CppType CppType;
-    enum { SIZE_OF_TYPE = TypeTraits<Type>::size };
     faststring _first_value;
     faststring _last_value;
 };
@@ -196,8 +214,19 @@ public:
         }
 
         size_t max_fetch = std::min(*n, static_cast<size_t>(_num_elems - _cur_idx));
-        memcpy(dst->data(), &_data[PLAIN_PAGE_HEADER_SIZE + _cur_idx * SIZE_OF_TYPE],
+        if (dst->type_info()->type() == OLAP_FIELD_TYPE_DATE) {
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATE>::convert_to_new_type(
+                    reinterpret_cast<char *>(dst->data()),
+                    reinterpret_cast<const char *>(&_data[PLAIN_PAGE_HEADER_SIZE + _cur_idx * SIZE_OF_TYPE]), max_fetch);
+        } else if (dst->type_info()->type() == OLAP_FIELD_TYPE_DATETIME) {
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATETIME>::convert_to_new_type(
+                    reinterpret_cast<char *>(dst->data()),
+                    reinterpret_cast<const char *>(&_data[PLAIN_PAGE_HEADER_SIZE + _cur_idx * SIZE_OF_TYPE]), max_fetch);
+        } else {
+            memcpy(dst->data(), &_data[PLAIN_PAGE_HEADER_SIZE + _cur_idx * SIZE_OF_TYPE],
                max_fetch * SIZE_OF_TYPE);
+        }
+
         if (forward_index) {
             _cur_idx += max_fetch;
         }
@@ -220,13 +249,17 @@ public:
     }
 
 private:
+    using CppType = std::conditional_t<Type != OLAP_FIELD_TYPE_DATE && Type != OLAP_FIELD_TYPE_DATETIME,
+          typename TypeTraits<Type>::CppType, typename CppTypeTraits<Type>::OriginCppType>;
+
+    static constexpr auto SIZE_OF_TYPE = Type != OLAP_FIELD_TYPE_DATE && Type != OLAP_FIELD_TYPE_DATETIME ?
+            TypeTraits<Type>::size : sizeof(typename CppTypeTraits<Type>::OriginCppType);
+
     Slice _data;
     PageDecoderOptions _options;
     bool _parsed;
     uint32_t _num_elems;
     uint32_t _cur_idx;
-    typedef typename TypeTraits<Type>::CppType CppType;
-    enum { SIZE_OF_TYPE = TypeTraits<Type>::size };
 };
 
 } // namespace segment_v2

@@ -135,37 +135,37 @@ struct AggregateFuncTraits<OLAP_FIELD_AGGREGATION_NONE, OLAP_FIELD_TYPE_DECIMAL>
     }
 };
 
-template <>
-struct AggregateFuncTraits<OLAP_FIELD_AGGREGATION_NONE, OLAP_FIELD_TYPE_DATETIME>
-        : public BaseAggregateFuncs<OLAP_FIELD_TYPE_DECIMAL> {
-    static void init(RowCursorCell* dst, const char* src, bool src_null, MemPool* mem_pool,
-                     ObjectPool* agg_pool) {
-        dst->set_is_null(src_null);
-        if (src_null) {
-            return;
-        }
-
-        auto* datetime_value = reinterpret_cast<const DateTimeValue*>(src);
-        auto* storage_datetime_value = reinterpret_cast<uint64_t*>(dst->mutable_cell_ptr());
-        *storage_datetime_value = datetime_value->to_olap_datetime();
-    }
-};
-
-template <>
-struct AggregateFuncTraits<OLAP_FIELD_AGGREGATION_NONE, OLAP_FIELD_TYPE_DATE>
-        : public BaseAggregateFuncs<OLAP_FIELD_TYPE_DECIMAL> {
-    static void init(RowCursorCell* dst, const char* src, bool src_null, MemPool* mem_pool,
-                     ObjectPool* agg_pool) {
-        dst->set_is_null(src_null);
-        if (src_null) {
-            return;
-        }
-
-        auto* date_value = reinterpret_cast<const DateTimeValue*>(src);
-        auto* storage_date_value = reinterpret_cast<uint24_t*>(dst->mutable_cell_ptr());
-        *storage_date_value = static_cast<int64_t>(date_value->to_olap_date());
-    }
-};
+//template <>
+//struct AggregateFuncTraits<OLAP_FIELD_AGGREGATION_NONE, OLAP_FIELD_TYPE_DATETIME>
+//        : public BaseAggregateFuncs<OLAP_FIELD_TYPE_DECIMAL> {
+//    static void init(RowCursorCell* dst, const char* src, bool src_null, MemPool* mem_pool,
+//                     ObjectPool* agg_pool) {
+//        dst->set_is_null(src_null);
+//        if (src_null) {
+//            return;
+//        }
+//
+//        auto* datetime_value = reinterpret_cast<const DateTimeValue*>(src);
+//        auto* storage_datetime_value = reinterpret_cast<uint64_t*>(dst->mutable_cell_ptr());
+//        *storage_datetime_value = datetime_value->to_olap_datetime();
+//    }
+//};
+//
+//template <>
+//struct AggregateFuncTraits<OLAP_FIELD_AGGREGATION_NONE, OLAP_FIELD_TYPE_DATE>
+//        : public BaseAggregateFuncs<OLAP_FIELD_TYPE_DECIMAL> {
+//    static void init(RowCursorCell* dst, const char* src, bool src_null, MemPool* mem_pool,
+//                     ObjectPool* agg_pool) {
+//        dst->set_is_null(src_null);
+//        if (src_null) {
+//            return;
+//        }
+//
+//        auto* date_value = reinterpret_cast<const DateTimeValue*>(src);
+//        auto* storage_date_value = reinterpret_cast<uint24_t*>(dst->mutable_cell_ptr());
+//        *storage_date_value = static_cast<int64_t>(date_value->to_olap_date());
+//    }
+//};
 
 template <FieldType field_type>
 struct AggregateFuncTraits<OLAP_FIELD_AGGREGATION_MIN, field_type>

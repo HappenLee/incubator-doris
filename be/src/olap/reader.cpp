@@ -713,13 +713,15 @@ void Reader::_init_conditions_param(const ReaderParams& read_params) {
             break;                                                                              \
         }                                                                                       \
         case OLAP_FIELD_TYPE_DATE: {                                                            \
-            uint24_t value = timestamp_from_date(cond);                                         \
-            predicate = new PREDICATE<uint24_t>(index, value, opposite);                        \
+            DateTimeValue value;                                                                \
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATE>::from_string((void*)(&value), cond);          \
+            predicate = new PREDICATE<DateTimeValue>(index, value, opposite);                   \
             break;                                                                              \
         }                                                                                       \
         case OLAP_FIELD_TYPE_DATETIME: {                                                        \
-            uint64_t value = timestamp_from_datetime(cond);                                     \
-            predicate = new PREDICATE<uint64_t>(index, value, opposite);                        \
+            DateTimeValue value;                                                                \
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATETIME>::from_string((void*)(&value), cond);      \
+            predicate = new PREDICATE<DateTimeValue>(index, value, opposite);                   \
             break;                                                                              \
         }                                                                                       \
         case OLAP_FIELD_TYPE_BOOL: {                                                            \
@@ -908,28 +910,30 @@ ColumnPredicate* Reader::_parse_to_predicate(const TCondition& condition, bool o
             break;
         }
         case OLAP_FIELD_TYPE_DATE: {
-            phmap::flat_hash_set<uint24_t> values;
+            phmap::flat_hash_set<DateTimeValue> values;
             for (auto& cond_val : condition.condition_values) {
-                uint24_t value = timestamp_from_date(cond_val);
-                values.insert(value);
+                DateTimeValue dt;
+                FieldTypeTraits<OLAP_FIELD_TYPE_DATE>::from_string((char*)(&dt), cond_val);
+                values.insert(dt);
             }
             if (condition.condition_op == "*=") {
-                predicate = new InListPredicate<uint24_t>(index, std::move(values), opposite);
+                predicate = new InListPredicate<DateTimeValue>(index, std::move(values), opposite);
             } else {
-                predicate = new NotInListPredicate<uint24_t>(index, std::move(values), opposite);
+                predicate = new NotInListPredicate<DateTimeValue>(index, std::move(values), opposite);
             }
             break;
         }
         case OLAP_FIELD_TYPE_DATETIME: {
-            phmap::flat_hash_set<uint64_t> values;
+            phmap::flat_hash_set<DateTimeValue> values;
             for (auto& cond_val : condition.condition_values) {
-                uint64_t value = timestamp_from_datetime(cond_val);
-                values.insert(value);
+                DateTimeValue dt;
+                FieldTypeTraits<OLAP_FIELD_TYPE_DATETIME>::from_string((char*)(&dt), cond_val);
+                values.insert(dt);
             }
             if (condition.condition_op == "*=") {
-                predicate = new InListPredicate<uint64_t>(index, std::move(values), opposite);
+                predicate = new InListPredicate<DateTimeValue>(index, std::move(values), opposite);
             } else {
-                predicate = new NotInListPredicate<uint64_t>(index, std::move(values), opposite);
+                predicate = new NotInListPredicate<DateTimeValue>(index, std::move(values), opposite);
             }
             break;
         }

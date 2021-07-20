@@ -82,6 +82,10 @@ void warn_with_bitshuffle_error(int64_t val);
 template <FieldType Type>
 class BitshufflePageBuilder : public PageBuilder {
 public:
+    static constexpr auto SIZE_OF_TYPE =
+            Type != OLAP_FIELD_TYPE_DATE && Type != OLAP_FIELD_TYPE_DATETIME ?
+            TypeTraits<Type>::size : sizeof(typename CppTypeTraits<Type>::OriginCppType);
+
     BitshufflePageBuilder(const PageBuilderOptions& options)
             : _options(options), _count(0), _remain_element_capacity(0), _finished(false) {
         reset();
@@ -92,7 +96,21 @@ public:
     Status add(const uint8_t* vals, size_t* count) override {
         DCHECK(!_finished);
         int to_add = std::min<int>(_remain_element_capacity, *count);
-        _data.append(vals, to_add * SIZE_OF_TYPE);
+
+        if constexpr (Type == OLAP_FIELD_TYPE_DATE) {
+            uint24_t buf[to_add];
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATE>::convert_to_origin_type(
+                    reinterpret_cast<char *>(buf), reinterpret_cast<const char *>(vals), to_add);
+            _data.append(buf, to_add * SIZE_OF_TYPE);
+        } else if constexpr (Type == OLAP_FIELD_TYPE_DATETIME) {
+            uint64_t buf[to_add];
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATETIME>::convert_to_origin_type(
+                    reinterpret_cast<char *>(buf), reinterpret_cast<const char *>(vals), to_add);
+            _data.append(buf, to_add * SIZE_OF_TYPE);
+        } else {
+            _data.append(vals, to_add * SIZE_OF_TYPE);
+        }
+
         _count += to_add;
         _remain_element_capacity -= to_add;
         // return added number through count
@@ -181,7 +199,8 @@ private:
         return _buffer.build();
     }
 
-    typedef typename TypeTraits<Type>::CppType CppType;
+    using CppType = std::conditional_t<Type != OLAP_FIELD_TYPE_DATE && Type != OLAP_FIELD_TYPE_DATETIME,
+          typename TypeTraits<Type>::CppType, typename CppTypeTraits<Type>::OriginCppType>;
 
     CppType cell(int idx) const {
         DCHECK_GE(idx, 0);
@@ -190,7 +209,6 @@ private:
         return ret;
     }
 
-    enum { SIZE_OF_TYPE = TypeTraits<Type>::size };
     PageBuilderOptions _options;
     uint32_t _count;
     int _remain_element_capacity;
@@ -334,12 +352,23 @@ public:
         }
 
         size_t max_fetch = std::min(*n, static_cast<size_t>(_num_elements - _cur_index));
-        _copy_next_values(max_fetch, dst->data());
+
+        if (dst->type_info()->type() == OLAP_FIELD_TYPE_DATE) {
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATE>::convert_to_new_type(
+                    reinterpret_cast<char *>(dst->data()),
+                    reinterpret_cast<const char *>(&_decoded[_cur_index * SIZE_OF_TYPE]), max_fetch);
+        } else if (dst->type_info()->type() == OLAP_FIELD_TYPE_DATETIME) {
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATETIME>::convert_to_new_type(
+                    reinterpret_cast<char *>(dst->data()),
+                    reinterpret_cast<const char *>(&_decoded[_cur_index * SIZE_OF_TYPE]), max_fetch);
+        } else {
+            _copy_next_values(max_fetch, dst->data());
+        }
+
         *n = max_fetch;
         if (forward_index) {
             _cur_index += max_fetch;
         }
-
         return Status::OK();
     }
 
@@ -372,9 +401,11 @@ private:
         return Status::OK();
     }
 
-    typedef typename TypeTraits<Type>::CppType CppType;
+    using CppType = std::conditional_t<Type != OLAP_FIELD_TYPE_DATE && Type != OLAP_FIELD_TYPE_DATETIME,
+          typename TypeTraits<Type>::CppType, typename CppTypeTraits<Type>::OriginCppType>;
 
-    enum { SIZE_OF_TYPE = TypeTraits<Type>::size };
+    static constexpr auto SIZE_OF_TYPE = Type != OLAP_FIELD_TYPE_DATE && Type != OLAP_FIELD_TYPE_DATETIME ?
+            TypeTraits<Type>::size : sizeof(typename CppTypeTraits<Type>::OriginCppType);
 
     Slice _data;
     PageDecoderOptions _options;

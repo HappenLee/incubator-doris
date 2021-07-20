@@ -41,7 +41,21 @@ public:
         if (*count == 0) {
             return Status::OK();
         }
+
         auto new_vals = reinterpret_cast<const CppType*>(vals);
+        auto to_add = *count;
+        if constexpr (Type == OLAP_FIELD_TYPE_DATE) {
+            uint24_t buf[to_add];
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATE>::convert_to_origin_type(
+                    reinterpret_cast<char *>(buf), reinterpret_cast<const char *>(vals), to_add);
+            new_vals = (const CppType*)buf;
+        } else if constexpr (Type == OLAP_FIELD_TYPE_DATETIME) {
+            uint64_t buf[to_add];
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATETIME>::convert_to_origin_type(
+                    reinterpret_cast<char *>(buf), reinterpret_cast<const char *>(vals), to_add);
+            new_vals = (const CppType*)buf;
+        }
+
         if (_count == 0) {
             _first_val = *new_vals;
         }
@@ -85,7 +99,9 @@ public:
     }
 
 private:
-    typedef typename TypeTraits<Type>::CppType CppType;
+    using CppType = std::conditional_t<Type != OLAP_FIELD_TYPE_DATE && Type != OLAP_FIELD_TYPE_DATETIME,
+      typename TypeTraits<Type>::CppType, typename CppTypeTraits<Type>::OriginCppType>;
+
     PageBuilderOptions _options;
     size_t _count;
     bool _finished;
@@ -153,7 +169,21 @@ public:
 
         size_t to_fetch = std::min(*n, static_cast<size_t>(_num_elements - _cur_index));
         uint8_t* data_ptr = dst->data();
-        _decoder->get_batch(reinterpret_cast<CppType*>(data_ptr), to_fetch);
+
+        if (dst->type_info()->type() == OLAP_FIELD_TYPE_DATE) {
+            uint24_t buf[to_fetch];
+            _decoder->get_batch(reinterpret_cast<CppType*>(buf), to_fetch);
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATE>::convert_to_new_type(
+                    reinterpret_cast<char *>(dst->data()), reinterpret_cast<const char *>(buf), to_fetch);
+        } else if (dst->type_info()->type() == OLAP_FIELD_TYPE_DATETIME) {
+            uint64_t buf[to_fetch];
+            _decoder->get_batch(reinterpret_cast<CppType*>(buf), to_fetch);
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATETIME>::convert_to_new_type(
+                    reinterpret_cast<char *>(dst->data()), reinterpret_cast<const char *>(buf), to_fetch);
+        } else {
+            _decoder->get_batch(reinterpret_cast<CppType*>(data_ptr), to_fetch);
+        }
+
         if (forward_index) {
             _cur_index += to_fetch;
         }
@@ -170,7 +200,8 @@ public:
     size_t current_index() const override { return _cur_index; }
 
 private:
-    typedef typename TypeTraits<Type>::CppType CppType;
+    using CppType = std::conditional_t<Type != OLAP_FIELD_TYPE_DATE && Type != OLAP_FIELD_TYPE_DATETIME,
+      typename TypeTraits<Type>::CppType, typename CppTypeTraits<Type>::OriginCppType>;
 
     bool _parsed;
     Slice _data;

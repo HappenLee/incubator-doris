@@ -328,7 +328,7 @@ COMPARISON_PRED_BITMAP_EVALUATE(GreaterEqualPredicate, >=)
     template CLASS<double>::CLASS(uint32_t column_id, const double& value, bool opposite);           \
     template CLASS<decimal12_t>::CLASS(uint32_t column_id, const decimal12_t& value, bool opposite); \
     template CLASS<StringValue>::CLASS(uint32_t column_id, const StringValue& value, bool opposite); \
-    template CLASS<uint24_t>::CLASS(uint32_t column_id, const uint24_t& value, bool opposite);       \
+    template CLASS<DateTimeValue>::CLASS(uint32_t column_id, const DateTimeValue& value, bool opposite);       \
     template CLASS<uint64_t>::CLASS(uint32_t column_id, const uint64_t& value, bool opposite);       \
     template CLASS<bool>::CLASS(uint32_t column_id, const bool& value, bool opposite);
 
@@ -349,7 +349,7 @@ COMPARISON_PRED_CONSTRUCTOR_DECLARATION(GreaterEqualPredicate)
     template void CLASS<double>::evaluate(VectorizedRowBatch* batch) const;      \
     template void CLASS<decimal12_t>::evaluate(VectorizedRowBatch* batch) const; \
     template void CLASS<StringValue>::evaluate(VectorizedRowBatch* batch) const; \
-    template void CLASS<uint24_t>::evaluate(VectorizedRowBatch* batch) const;    \
+    template void CLASS<DateTimeValue>::evaluate(VectorizedRowBatch* batch) const;    \
     template void CLASS<uint64_t>::evaluate(VectorizedRowBatch* batch) const;    \
     template void CLASS<bool>::evaluate(VectorizedRowBatch* batch) const;
 
@@ -378,7 +378,7 @@ COMPARISON_PRED_EVALUATE_DECLARATION(GreaterEqualPredicate)
             const;                                                                                 \
     template void CLASS<StringValue>::evaluate(ColumnBlock* block, uint16_t* sel, uint16_t* size)  \
             const;                                                                                 \
-    template void CLASS<uint24_t>::evaluate(ColumnBlock* block, uint16_t* sel, uint16_t* size)     \
+    template void CLASS<DateTimeValue>::evaluate(ColumnBlock* block, uint16_t* sel, uint16_t* size)     \
             const;                                                                                 \
     template void CLASS<uint64_t>::evaluate(ColumnBlock* block, uint16_t* sel, uint16_t* size)     \
             const;                                                                                 \
@@ -419,7 +419,7 @@ COMPARISON_PRED_COLUMN_BLOCK_EVALUATE_DECLARATION(GreaterEqualPredicate)
     template Status CLASS<StringValue>::evaluate(                                                 \
             const Schema& schema, const std::vector<BitmapIndexIterator*>& iterators,             \
             uint32_t num_rows, Roaring* bitmap) const;                                            \
-    template Status CLASS<uint24_t>::evaluate(const Schema& schema,                               \
+    template Status CLASS<DateTimeValue>::evaluate(const Schema& schema,                               \
                                               const std::vector<BitmapIndexIterator*>& iterators, \
                                               uint32_t num_rows, Roaring* bitmap) const;          \
     template Status CLASS<uint64_t>::evaluate(const Schema& schema,                               \

@@ -346,18 +346,22 @@ public:
             break;
         }
         case OLAP_FIELD_TYPE_DATE: {
-            _values = reinterpret_cast<void*>(mem_pool->allocate(size * sizeof(uint24_t)));
-            uint24_t value = timestamp_from_date(_default_value);
+            _values = reinterpret_cast<void*>(mem_pool->allocate(size * sizeof(DateTimeValue)));
+            DateTimeValue dt;
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATE>::from_string((void*)(&dt), _default_value);
+
             for (int i = 0; i < size; ++i) {
-                ((uint24_t*)_values)[i] = value;
+                ((DateTimeValue*)_values)[i] = dt;
             }
             break;
         }
         case OLAP_FIELD_TYPE_DATETIME: {
-            _values = reinterpret_cast<void*>(mem_pool->allocate(size * sizeof(uint64_t)));
-            uint64_t value = timestamp_from_datetime(_default_value);
+            _values = reinterpret_cast<void*>(mem_pool->allocate(size * sizeof(DateTimeValue)));
+            DateTimeValue dt;
+            FieldTypeTraits<OLAP_FIELD_TYPE_DATETIME>::from_string((void*)(&dt), _default_value);
+
             for (int i = 0; i < size; ++i) {
-                ((uint64_t*)_values)[i] = value;
+                ((DateTimeValue*)_values)[i] = dt;
             }
             break;
         }
@@ -517,7 +521,7 @@ public:
 
     virtual size_t get_buffer_size() { return sizeof(RunLengthIntegerReader); }
 
-private:
+protected:
     IntegerColumnReader _reader; // 被包裹的真实读取器
     T* _values;
     bool _eof;
@@ -828,13 +832,75 @@ typedef FloatintPointColumnReader<float> FloatColumnReader;
 typedef FloatintPointColumnReader<double> DoubleColumnReader;
 typedef IntegerColumnReaderWrapper<int64_t, true> DiscreteDoubleColumnReader;
 
-// 使用3个字节存储的日期
-// 使用IntegerColumnReader，在返回数据时截断到3字节长度
-typedef IntegerColumnReaderWrapper<uint24_t, false> DateColumnReader;
+template <FieldType T>
+class TimeColumnReader : public IntegerColumnReaderWrapper<typename CppTypeTraits<T>::CppType, false> {
+public:
+    using super = IntegerColumnReaderWrapper<typename CppTypeTraits<T>::CppType, false>;
 
-// 内部使用LONG实现
-typedef IntegerColumnReaderWrapper<uint64_t, false> DateTimeColumnReader;
+    TimeColumnReader(uint32_t column_id, uint32_t column_unique_id)
+            : IntegerColumnReaderWrapper<typename CppTypeTraits<T>::CppType, false>(column_id, column_unique_id){}
 
+    virtual ~TimeColumnReader() {}
+
+    virtual OLAPStatus init(std::map<StreamName, ReadOnlyFileStream*>* streams, int size,
+                            MemPool* mem_pool, OlapReaderStatistics* stats) {
+        OLAPStatus res = ColumnReader::init(streams, size, mem_pool, stats);
+
+        if (OLAP_SUCCESS == res) {
+            res = super::_reader.init(streams, false);
+        }
+
+        super::_values = reinterpret_cast<DateTimeValue*>(mem_pool->allocate(size * sizeof(DateTimeValue)));
+
+        return res;
+    }
+
+
+    virtual OLAPStatus next_vector(ColumnVector* column_vector, uint32_t size, MemPool* mem_pool) {
+        OLAPStatus res = ColumnReader::next_vector(column_vector, size, mem_pool);
+        if (OLAP_SUCCESS != res) {
+            if (OLAP_ERR_DATA_EOF == res) {
+                super::_eof = true;
+            }
+            return res;
+        }
+
+        column_vector->set_col_data(super::_values);
+        if (column_vector->no_nulls()) {
+            for (uint32_t i = 0; i < size; ++i) {
+                int64_t value = 0;
+                res = super::_reader.next(&value);
+                if (OLAP_SUCCESS != res) {
+                    break;
+                }
+                typename CppTypeTraits<T>::OriginUnsignedCppType tmp = value;
+                super::_values[i] = CppTypeTraits<T>::to_new_type(tmp);
+            }
+        } else {
+            bool* is_null = column_vector->is_null();
+            for (uint32_t i = 0; i < size; ++i) {
+                int64_t value = 0;
+                if (!is_null[i]) {
+                    res = super::_reader.next(&value);
+                    if (OLAP_SUCCESS != res) {
+                        break;
+                    }
+                }
+                typename CppTypeTraits<T>::OriginUnsignedCppType tmp = value;
+                super::_values[i] = CppTypeTraits<T>::to_new_type(tmp);
+            }
+        }
+
+        super::_stats->bytes_read += sizeof(DateTimeValue) * size;
+        if (OLAP_ERR_DATA_EOF == res) {
+            super::_eof = true;
+        }
+        return res;
+    }
+};
+
+using DateColumnReader = TimeColumnReader<OLAP_FIELD_TYPE_DATE>;
+using DateTimeColumnReader = TimeColumnReader<OLAP_FIELD_TYPE_DATETIME>;
 } // namespace doris
 
 #endif // DORIS_BE_SRC_OLAP_ROWSET_COLUMN_READER_H

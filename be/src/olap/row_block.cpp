@@ -79,7 +79,7 @@ void RowBlock::_compute_layout() {
     std::unordered_set<uint32_t> column_set(_info.column_ids.begin(), _info.column_ids.end());
     size_t memory_size = 0;
     for (int col_id = 0; col_id < _schema->num_columns(); ++col_id) {
-        const TabletColumn& column = _schema->column(col_id);
+        const TabletColumn &column = _schema->column(col_id);
         if (!column_set.empty() && column_set.find(col_id) == column_set.end()) {
             // which may lead BE crash
             _field_offset_in_memory.push_back(std::numeric_limits<std::size_t>::max());
@@ -93,6 +93,8 @@ void RowBlock::_compute_layout() {
             column.type() == OLAP_FIELD_TYPE_CHAR || column.type() == OLAP_FIELD_TYPE_OBJECT) {
             // 变长部分额外计算下实际最大的字符串长度（此处length已经包括记录Length的2个字节）
             memory_size += sizeof(Slice) + sizeof(char);
+        } else if (column.type() == OLAP_FIELD_TYPE_DATE || column.type() == OLAP_FIELD_TYPE_DATETIME) {
+            memory_size += sizeof(DateTimeValue) + sizeof(char);
         } else {
             memory_size += column.length() + sizeof(char);
         }
