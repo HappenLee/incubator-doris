@@ -159,6 +159,17 @@ struct DateTimeOp {
         }
     }
 
+    // use for (DateTime, int32) -> other_type
+    static void vector_vector(const PaddedPODArray<FromType>& vec_from0,
+                              const PaddedPODArray<Int32>& vec_from1,
+                              PaddedPODArray<ToType>& vec_to) {
+        size_t size = vec_from0.size();
+        vec_to.resize(size);
+
+        for (size_t i = 0; i < size; ++i)
+            vec_to[i] = Transform::execute(vec_from0[i], vec_from1[i]);
+    }
+
     // use for (DateTime, const DateTime) -> other_type
     static void vector_constant(const PaddedPODArray<FromType>& vec_from,
                                 PaddedPODArray<ToType>& vec_to, NullMap& null_map, Int128& delta) {
@@ -235,10 +246,17 @@ struct DateTimeAddIntervalImpl {
                                         delta_const_column->get_field().get<Int64>());
                 }
             } else {
-                const auto* delta_vec_column =
-                        check_and_get_column<ColumnVector<FromType>>(delta_column);
-                Op::vector_vector(sources->get_data(), delta_vec_column->get_data(),
-                                  col_to->get_data(), null_map->get_data());
+                if (const auto* delta_vec_column0 =
+                        check_and_get_column<ColumnVector<FromType>>(delta_column)) {
+                    Op::vector_vector(sources->get_data(), delta_vec_column0->get_data(),
+                                      col_to->get_data());
+                } else {
+                    const auto* delta_vec_column1 =
+                        check_and_get_column<ColumnVector<Int32>>(delta_column);
+                    DCHECK(delta_vec_column1 != nullptr);
+                    Op::vector_vector(sources->get_data(), delta_vec_column1->get_data(),
+                                      col_to->get_data());
+                }
             }
 
             if constexpr (!Transform::is_nullable)

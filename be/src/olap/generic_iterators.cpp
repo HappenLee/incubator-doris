@@ -204,7 +204,7 @@ Status MergeIteratorContext::_load_next_block() {
 class MergeIterator : public RowwiseIterator {
 public:
     // MergeIterator takes the ownership of input iterators
-    MergeIterator(std::list<RowwiseIterator*> iters, std::shared_ptr<MemTracker> parent) : _origin_iters(std::move(iters)) {
+    MergeIterator(std::list<RowwiseIterator*> iters, std::shared_ptr<MemTracker> parent): _origin_iters(std::move(iters)) {
         // use for count the mem use of Block use in Merge
         _mem_tracker = MemTracker::CreateTracker(-1, "MergeIterator", parent, false);
     }
