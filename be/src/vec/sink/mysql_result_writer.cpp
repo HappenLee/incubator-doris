@@ -129,6 +129,15 @@ Status MysqlResultWriter::_add_one_column(const ColumnPtr& column_ptr) {
             std::string time_str = time_str_from_double(time);
             buf_ret = _vec_buffers[i]->push_string(time_str.c_str(), time_str.size());
         }
+        if constexpr (type == TYPE_DATE) {
+            char buf[64];
+            auto time_num = assert_cast<const ColumnVector<Int128>&>(*column).get_data()[i];
+            DateTimeValue time_val;
+            memcpy(&time_val, &time_num, sizeof(Int128));
+            time_val.cast_to_date();
+            char* pos = time_val.to_string(buf);
+            buf_ret = _vec_buffers[i]->push_string(buf, pos - buf - 1);
+        }
         if constexpr (type == TYPE_DATETIME) {
             char buf[64];
             auto time_num = assert_cast<const ColumnVector<Int128>&>(*column).get_data()[i];
@@ -309,6 +318,12 @@ Status MysqlResultWriter::append_block(Block& block) {
             break;
         }
         case TYPE_DATE:
+            if (type_ptr->is_nullable()) {
+                status = _add_one_column<PrimitiveType::TYPE_DATE, true>(column_ptr);
+            } else {
+                status = _add_one_column<PrimitiveType::TYPE_DATE, false>(column_ptr);
+            }
+            break;
         case TYPE_DATETIME: {
             if (type_ptr->is_nullable()) {
                 status = _add_one_column<PrimitiveType::TYPE_DATETIME, true>(column_ptr);
