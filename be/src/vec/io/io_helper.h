@@ -73,31 +73,31 @@ inline std::string int128_to_string(UInt128 value) {
 
 template <typename T>
 void write_text(Decimal<T> value, UInt32 scale, std::ostream& ostr) {
-    if constexpr (std::is_same_v<Int128I, T>) {
-        if (value.value.val < 0) {
-            value.value.val *= -1;
-            ostr << '-';
-        }
-    } else {
+//    if constexpr (std::is_same_v<Int128I, T>) {
+//        if (value.value.val < 0) {
+//            value.value.val *= -1;
+//            ostr << '-';
+//        }
+//    } else {
         if (value < Decimal<T>(0)) {
             value *= Decimal<T>(-1);
             ostr << '-';
         }
-    }
+//    }
 
     T whole_part = value.value;
 
     if (scale) {
-        if constexpr (std::is_same_v<Int128I, T>) {
-            whole_part = value.value.val / decimal_scale_multiplier<Int128I>(scale);
-        } else {
+//        if constexpr (std::is_same_v<Int128I, T>) {
+//            whole_part = value.value.val / decimal_scale_multiplier<Int128I>(scale);
+//        } else {
             whole_part = value / decimal_scale_multiplier<T>(scale);
-        }
+//        }
     }
-    if constexpr (std::is_same_v<T, __int128_t>) {
+    if constexpr (std::is_same_v<T, __int128_t> || std::is_same_v<T, Int128I>) {
         ostr << int128_to_string(whole_part);
-    } else if constexpr (std::is_same_v<T, Int128I>) {
-        ostr << int128_to_string(whole_part.val);
+//    } else if constexpr (std::is_same_v<T, Int128I>) {
+//        ostr << int128_to_string(whole_part.val);
     } else {
         ostr << whole_part;
     }
@@ -105,11 +105,11 @@ void write_text(Decimal<T> value, UInt32 scale, std::ostream& ostr) {
         ostr << '.';
         String str_fractional(scale, '0');
         for (Int32 pos = scale - 1; pos >= 0; --pos, value /= 10) {
-            if constexpr (std::is_same_v<T, Int128I>) {
-                str_fractional[pos] += value.value.val % 10;
-            } else {
+//            if constexpr (std::is_same_v<T, Int128I>) {
+//                str_fractional[pos] += value.value.val % 10;
+//            } else {
                 str_fractional[pos] += value % 10;
-            }
+//            }
         }
         ostr.write(str_fractional.data(), scale);
     }

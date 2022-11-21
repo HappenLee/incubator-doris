@@ -350,17 +350,17 @@ struct Decimal {
 
     template <typename U>
     Decimal(const Decimal<U>& x) {
-        if constexpr (std::is_same_v<Int128I, U>) {
-            value = x.value.val;
-        } else {
+//        if constexpr (std::is_same_v<Int128I, U>) {
+//            value = x.value.val;
+//        } else {
             value = x;
-        }
+//        }
     }
 
     constexpr Decimal<T>& operator=(Decimal<T>&&) = default;
     constexpr Decimal<T>& operator=(const Decimal<T>&) = default;
 
-    operator int128_t() const { return value; }
+    operator T() const { return value; }
 
     const Decimal<T>& operator+=(const T& x) {
         value += x;
@@ -384,6 +384,34 @@ struct Decimal {
     }
 
     T value;
+};
+
+template<>
+struct Decimal<Int128I> : public Decimal<Int128> {
+    Decimal() = default;
+//    Decimal(Decimal<Int128I>&&) = default;
+//    Decimal(const Decimal<Int128I>&) = default;
+
+#define DECLARE_NUMERIC_CTOR(TYPE) \
+    Decimal(const TYPE& value_) : Decimal<Int128>(value_) {}
+
+    DECLARE_NUMERIC_CTOR(Int128)
+    DECLARE_NUMERIC_CTOR(Int32)
+    DECLARE_NUMERIC_CTOR(Int64)
+    DECLARE_NUMERIC_CTOR(UInt32)
+    DECLARE_NUMERIC_CTOR(UInt64)
+    DECLARE_NUMERIC_CTOR(Float32)
+    DECLARE_NUMERIC_CTOR(Float64)
+#undef DECLARE_NUMERIC_CTOR
+
+    template <typename U>
+    Decimal(const Decimal<U>& x) {
+        //        if constexpr (std::is_same_v<Int128I, U>) {
+        //            value = x.value.val;
+        //        } else {
+        value = x;
+        //        }
+    }
 };
 
 using Decimal32 = Decimal<Int32>;
@@ -577,14 +605,14 @@ struct hash<doris::vectorized::Decimal128> {
     }
 };
 
-template <>
-struct hash<doris::vectorized::Decimal128I> {
-    size_t operator()(const doris::vectorized::Decimal128I& x) const {
-        return std::hash<doris::vectorized::Int64>()(x.value.val >> 64) ^
-               std::hash<doris::vectorized::Int64>()(
-                       x.value.val & std::numeric_limits<doris::vectorized::UInt64>::max());
-    }
-};
+//template <>
+//struct hash<doris::vectorized::Decimal128I> {
+//    size_t operator()(const doris::vectorized::Decimal128I& x) const {
+//        return std::hash<doris::vectorized::Int64>()(x.value.val >> 64) ^
+//               std::hash<doris::vectorized::Int64>()(
+//                       x.value.val & std::numeric_limits<doris::vectorized::UInt64>::max());
+//    }
+//};
 
 constexpr bool is_integer(doris::vectorized::TypeIndex index) {
     using TypeIndex = doris::vectorized::TypeIndex;

@@ -177,26 +177,26 @@ public:
     }
     void get(size_t n, Field& res) const override { res = (*this)[n]; }
     bool get_bool(size_t n) const override {
-        if constexpr (IsDecimal128I) {
-            return bool(data[n].value.val);
-        } else {
+//        if constexpr (IsDecimal128I) {
+//            return bool(data[n].value.val);
+//        } else {
             return bool(data[n]);
-        }
+//        }
     }
     Int64 get_int(size_t n) const override {
-        if constexpr (IsDecimal128I) {
-            return Int64(data[n].value.val * scale);
-        } else {
+//        if constexpr (IsDecimal128I) {
+//            return Int64(data[n].value.val * scale);
+//        } else {
             return Int64(data[n] * scale);
-        }
+//        }
     }
     UInt64 get64(size_t n) const override;
     bool is_default_at(size_t n) const override {
-        if constexpr (IsDecimal128I) {
-            return data[n].value.val == 0;
-        } else {
+//        if constexpr (IsDecimal128I) {
+//            return data[n].value.val == 0;
+//        } else {
             return data[n] == 0;
-        }
+//        }
     }
 
     void clear() override { data.clear(); }
@@ -260,18 +260,18 @@ public:
 
     T get_scale_multiplier() const;
     T get_whole_part(size_t n) const {
-        if constexpr (IsDecimal128I) {
-            return data[n].value.val / get_scale_multiplier().value.val;
-        } else {
+//        if constexpr (IsDecimal128I) {
+//            return data[n].value.val / get_scale_multiplier().value.val;
+//        } else {
             return data[n] / get_scale_multiplier();
-        }
+//        }
     }
     T get_fractional_part(size_t n) const {
-        if constexpr (IsDecimal128I) {
-            return data[n].value.val % get_scale_multiplier().value.val;
-        } else {
+//        if constexpr (IsDecimal128I) {
+//            return data[n].value.val % get_scale_multiplier().value.val;
+//        } else {
             return data[n] % get_scale_multiplier();
-        }
+//        }
     }
 
 protected:
@@ -287,23 +287,23 @@ protected:
         auto sort_end = res.end();
         if (limit && limit < s) sort_end = res.begin() + limit;
 
-        if constexpr (doris::vectorized::IsDecimal128I<T>) {
-            if (reverse)
-                std::partial_sort(res.begin(), sort_end, res.end(), [this](size_t a, size_t b) {
-                    return data[a].value.val > data[b].value.val;
-                });
-            else
-                std::partial_sort(res.begin(), sort_end, res.end(), [this](size_t a, size_t b) {
-                    return data[a].value.val < data[b].value.val;
-                });
-        } else {
+//        if constexpr (doris::vectorized::IsDecimal128I<T>) {
+//            if (reverse)
+//                std::partial_sort(res.begin(), sort_end, res.end(), [this](size_t a, size_t b) {
+//                    return data[a].value.val > data[b].value.val;
+//                });
+//            else
+//                std::partial_sort(res.begin(), sort_end, res.end(), [this](size_t a, size_t b) {
+//                    return data[a].value.val < data[b].value.val;
+//                });
+//        } else {
             if (reverse)
                 std::partial_sort(res.begin(), sort_end, res.end(),
                                   [this](size_t a, size_t b) { return data[a] > data[b]; });
             else
                 std::partial_sort(res.begin(), sort_end, res.end(),
                                   [this](size_t a, size_t b) { return data[a] < data[b]; });
-        }
+//        }
     }
 };
 
