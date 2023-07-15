@@ -206,9 +206,49 @@ public:
 
     size_t hash(const Key& x) const { return _hash_map.hash(x); }
 
+    template <bool READ = true>
     void ALWAYS_INLINE prefetch_by_hash(size_t hash_value) { _hash_map.prefetch_hash(hash_value); }
 
+    template <bool READ = true>
     void ALWAYS_INLINE prefetch_by_key(Key key) { _hash_map.prefetch(key); }
+
+    template <bool READ, typename KeyHolder>
+    void ALWAYS_INLINE prefetch(KeyHolder& key_holder) {
+        const auto& key = key_holder_get_key(key_holder);
+        prefetch_by_key<READ>(key);
+    }
+
+    size_t get_size() {
+        return _hash_map.size();
+    }
+
+    std::vector<size_t> sizes() const {
+        std::vector<size_t> sizes {_hash_map.size()};
+        return sizes;
+    }
+
+    int64_t get_resize_timer_value() const {
+        return 0;
+    }
+
+    int64_t get_convert_timer_value() const {
+        return 0;
+    }
+
+    int64_t get_collisions() const {
+        return 0;
+    }
+
+    void reset_resize_timer() {
+    }
+
+    void expanse_for_add_elem(size_t num_elem) {
+        _hash_map.reserve(num_elem);
+    }
+
+    std::vector<size_t> get_buffer_sizes_in_cells() const {
+        return sizes();
+    }
 
     /// Call func(const Key &, Mapped &) for each hash map element.
     template <typename Func>

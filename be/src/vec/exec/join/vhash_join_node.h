@@ -109,7 +109,8 @@ private:
 template <class T, typename RowRefListType>
 struct PrimaryTypeHashTableContext {
     using Mapped = RowRefListType;
-    using HashTable = PartitionedHashMap<T, Mapped, HashCRC32<T>>;
+//    using HashTable = PHPartitionedHashMap<T, Mapped, HashCRC32<T>>;
+    using HashTable = PHHashMap<T, Mapped, HashCRC32<T>>;
     using State =
             ColumnsHashing::HashMethodOneNumber<typename HashTable::value_type, Mapped, T, false>;
     using Iter = typename HashTable::iterator;
