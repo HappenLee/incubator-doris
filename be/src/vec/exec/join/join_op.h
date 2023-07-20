@@ -16,6 +16,8 @@
 // under the License.
 
 #pragma once
+#include <type_traits>
+
 #include "vec/common/arena.h"
 #include "vec/common/columns_hashing.h"
 #include "vec/common/hash_table/hash_map.h"
@@ -73,7 +75,7 @@ struct Batch {
 
     Batch(Batch<RowRefType>* parent) : next(parent) {}
 
-    bool full() const { return size == MAX_SIZE; }
+    [[nodiscard]] bool full() const { return size == MAX_SIZE; }
 
     Batch<RowRefType>* insert(RowRefType&& row_ref, Arena& pool) {
         if (full()) {
@@ -88,22 +90,25 @@ struct Batch {
     }
 };
 
-template <typename RowRefListType>
-class ForwardIterator {
+template <typename RowRefListType, typename Derived, bool Const>
+class ForwardIteratorBase {
 public:
-    using RowRefType = typename RowRefListType::RowRefType;
-    ForwardIterator() : root(nullptr), first(false), batch(nullptr), position(0) {}
+    using cell_type = std::conditional_t<Const, const RowRefListType, RowRefListType>;
+    using RowRefType = typename cell_type::RowRefType;
+    ForwardIteratorBase() : root(nullptr), first(false), batch(nullptr), position(0) {}
 
-    ForwardIterator(RowRefListType* begin)
-            : root(begin), first(true), batch(root->next), position(0) {}
+    ForwardIteratorBase(cell_type* begin)
+            : root(begin), first(true), batch(root->get_next()), position(0) {}
 
     RowRefType& operator*() {
-        if (first) return *root;
+        if (first) {
+            return *root;
+        }
         return batch->row_refs[position];
     }
     RowRefType* operator->() { return &(**this); }
 
-    bool operator==(const ForwardIterator<RowRefListType>& rhs) const {
+    bool operator==(const ForwardIteratorBase& rhs) const {
         if (ok() != rhs.ok()) {
             return false;
         }
@@ -112,7 +117,7 @@ public:
         }
         return batch == rhs.batch && position == rhs.position;
     }
-    bool operator!=(const ForwardIterator<RowRefListType>& rhs) const { return !(*this == rhs); }
+    bool operator!=(const ForwardIteratorBase& rhs) const { return !(*this == rhs); }
 
     void operator++() {
         if (first) {
@@ -129,21 +134,35 @@ public:
         }
     }
 
-    bool ok() const { return first || batch; }
+    [[nodiscard]] bool ok() const { return first || batch; }
 
-    static ForwardIterator<RowRefListType> end() { return ForwardIterator(); }
+    static Derived end() { return Derived(); }
 
 private:
-    RowRefListType* root;
+    cell_type* root;
     bool first;
     Batch<RowRefType>* batch;
     size_t position;
+};
+template <typename RowRefListType>
+class ForwardIterator
+        : public ForwardIteratorBase<RowRefListType, ForwardIterator<RowRefListType>, false> {
+    using ForwardIteratorBase<RowRefListType, ForwardIterator<RowRefListType>,
+                              false>::ForwardIteratorBase;
+};
+
+template <typename RowRefListType>
+class ConstForwardIterator
+        : public ForwardIteratorBase<RowRefListType, ForwardIterator<RowRefListType>, true> {
+    using ForwardIteratorBase<RowRefListType, ForwardIterator<RowRefListType>,
+                              true>::ForwardIteratorBase;
 };
 
 struct RowRefList : RowRef {
     using RowRefType = RowRef;
 
     RowRefList() = default;
+    RowRefList(void*) {}
     RowRefList(size_t row_num_, uint8_t block_offset_) : RowRef(row_num_, block_offset_) {}
 
     ForwardIterator<RowRefList> begin() { return ForwardIterator<RowRefList>(this); }
@@ -160,11 +179,11 @@ struct RowRefList : RowRef {
         next = next->insert(std::move(row_ref), pool);
     }
 
-    uint32_t get_row_count() { return row_count; }
+    [[nodiscard]] uint32_t get_row_count() const { return row_count; }
+
+    [[nodiscard]] auto get_next() const { return next; }
 
 private:
-    friend class ForwardIterator<RowRefList>;
-
     Batch<RowRefType>* next = nullptr;
     uint32_t row_count = 1;
 };
@@ -173,10 +192,15 @@ struct RowRefListWithFlag : RowRef {
     using RowRefType = RowRef;
 
     RowRefListWithFlag() = default;
+    RowRefListWithFlag(void*) {}
     RowRefListWithFlag(size_t row_num_, uint8_t block_offset_) : RowRef(row_num_, block_offset_) {}
 
     ForwardIterator<RowRefListWithFlag> begin() {
         return ForwardIterator<RowRefListWithFlag>(this);
+    }
+
+    [[nodiscard]] ConstForwardIterator<RowRefListWithFlag> begin() const {
+        return ConstForwardIterator<RowRefListWithFlag>(this);
     }
 
     static ForwardIterator<RowRefListWithFlag> end() {
@@ -194,13 +218,13 @@ struct RowRefListWithFlag : RowRef {
         next = next->insert(std::move(row_ref), pool);
     }
 
-    uint32_t get_row_count() { return row_count; }
+    [[nodiscard]] uint32_t get_row_count() const { return row_count; }
+
+    [[nodiscard]] auto get_next() const { return next; }
 
     bool visited = false;
 
 private:
-    friend class ForwardIterator<RowRefListWithFlag>;
-
     Batch<RowRefType>* next = nullptr;
     uint32_t row_count = 1;
 };
@@ -209,12 +233,17 @@ struct RowRefListWithFlags : RowRefWithFlag {
     using RowRefType = RowRefWithFlag;
 
     RowRefListWithFlags() = default;
+    RowRefListWithFlags(void*) {}
     RowRefListWithFlags(size_t row_num_, uint8_t block_offset_)
             : RowRefWithFlag(row_num_, block_offset_) {}
 
-    ForwardIterator<RowRefListWithFlags> begin() {
+    [[nodiscard]] ForwardIterator<RowRefListWithFlags> begin() {
         return ForwardIterator<RowRefListWithFlags>(this);
     }
+    [[nodiscard]] ConstForwardIterator<RowRefListWithFlags> begin() const {
+        return ConstForwardIterator<RowRefListWithFlags>(this);
+    }
+
     static ForwardIterator<RowRefListWithFlags> end() {
         return ForwardIterator<RowRefListWithFlags>::end();
     }
@@ -230,11 +259,11 @@ struct RowRefListWithFlags : RowRefWithFlag {
         next = next->insert(std::move(row_ref), pool);
     }
 
-    uint32_t get_row_count() { return row_count; }
+    [[nodiscard]] uint32_t get_row_count() const { return row_count; }
+
+    [[nodiscard]] auto get_next() const { return next; }
 
 private:
-    friend class ForwardIterator<RowRefListWithFlags>;
-
     Batch<RowRefType>* next = nullptr;
     uint32_t row_count = 1;
 };

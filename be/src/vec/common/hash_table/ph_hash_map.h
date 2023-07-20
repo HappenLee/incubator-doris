@@ -93,6 +93,15 @@ public:
         auto& operator*() { return *this; }
         auto* operator->() { return this; }
 
+        // no need for indirect usage
+        auto& get_value() const { return *base_iterator; }
+
+        // no need for indirect usage
+        void set_zero() {
+            //ZeroTraits::set(const_cast<decltype(base_iterator->first)>(base_iterator->first));
+            // we dont use this since we have no zero_subtable.
+        }
+
         const auto& get_first() const { return base_iterator->first; }
 
         const auto& get_second() const { return base_iterator->second; }
@@ -190,6 +199,21 @@ public:
         it->second = value;
     }
 
+    // use phhashmap as hash_set may need this.
+    // no need for indirect usage
+    void ALWAYS_INLINE insert(const Key& key) {
+        auto hash_value = hash(key);
+        auto it = &*_hash_map.lazy_emplace_with_hash(key, hash_value,
+                                                     [&](const auto& ctor) { ctor(key, {}); });
+        it->second = {}; // better than nullptr
+    }
+
+    // no need for indirect usage
+    template <typename KV_Pair>
+    void ALWAYS_INLINE insert(const KV_Pair& kv_pair) {
+        _hash_map.insert_or_assign(kv_pair.first, kv_pair.second);
+    }
+
     template <typename KeyHolder>
     LookupResult ALWAYS_INLINE find(KeyHolder&& key_holder) {
         const auto& key = key_holder_get_key(key_holder);
@@ -216,6 +240,13 @@ public:
     void ALWAYS_INLINE prefetch(KeyHolder& key_holder) {
         const auto& key = key_holder_get_key(key_holder);
         prefetch_by_key<READ>(key);
+    }
+
+    // no need for indirect usage
+    template <typename KeyHolder>
+    void ALWAYS_INLINE prefetch(KeyHolder& key_holder) {
+        const auto& key = key_holder_get_key(key_holder);
+        prefetch_by_key(key);
     }
 
     size_t get_size() {
@@ -295,6 +326,29 @@ public:
     bool empty() const { return _hash_map.empty(); }
 
     void clear_and_shrink() { _hash_map.clear(); }
+
+    bool should_be_shrink(int64_t valid_row) const {
+        // return valid_row < max_load_factor() * (size() / 2.0); //TODO: Use this?
+        return false; // Or use this? for its' base class has no shrink operator at all.
+    }
+
+    void init_buf_size(size_t reserve_for_num_elements) {
+        _hash_map.clear();
+        _hash_map.reserve(reserve_for_num_elements);
+    }
+
+    // no need for indirect usage
+    float get_factor() const { return _hash_map.max_load_factor(); }
+
+    void delete_zero_key(const Key& key)
+        requires requires(Key key) { key == 0; }
+    {
+        if (key == 0) {
+            _hash_map.erase(key);
+        }
+    }
+
+    void delete_zero_key(const Key& key) {}
 
 private:
     void _check_if_need_partition() {

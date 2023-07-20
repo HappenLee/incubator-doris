@@ -674,8 +674,8 @@ void VSetOperationNode<is_intersect>::refresh_hash_table() {
                     if constexpr (std::is_same_v<typename HashTableCtxType::Mapped,
                                                  RowRefListWithFlags>) {
                         HashTableCtxType tmp_hash_table;
-                        bool is_need_shrink =
-                                arg.hash_table.should_be_shrink(_valid_element_in_hash_tbl);
+                        bool is_need_shrink = arg.hash_table.should_be_shrink(
+                                _valid_element_in_hash_tbl); // alway false when use phhashmap?
                         if (is_need_shrink) {
                             tmp_hash_table.hash_table.init_buf_size(
                                     _valid_element_in_hash_tbl / arg.hash_table.get_factor() + 1);
@@ -691,34 +691,34 @@ void VSetOperationNode<is_intersect>::refresh_hash_table() {
                             if constexpr (is_intersect) { //intersected
                                 if (it->visited) {
                                     it->visited = false;
-                                    if (is_need_shrink) {
-                                        tmp_hash_table.hash_table.insert(iter->get_value());
-                                    }
+                                    // if (is_need_shrink) {
+                                    //     tmp_hash_table.hash_table.insert(iter->get_value());
+                                    // }
                                     ++iter;
                                 } else {
-                                    if (!is_need_shrink) {
-                                        arg.hash_table.delete_zero_key(iter->get_first());
-                                        // the ++iter would check if the current key is zero. if it does, the iterator will be moved to the container's head.
-                                        // so we do ++iter before set_zero to make the iterator move to next valid key correctly.
-                                        auto iter_prev = iter;
-                                        ++iter;
-                                        iter_prev->set_zero();
-                                    } else {
-                                        ++iter;
-                                    }
+                                    // if (!is_need_shrink) {
+                                    //     arg.hash_table.delete_zero_key(iter->get_first());
+                                    //     // the ++iter would check if the current key is zero. if it does, the iterator will be moved to the container's head.
+                                    //     // so we do ++iter before set_zero to make the iterator move to next valid key correctly.
+                                    //     auto iter_prev = iter;
+                                    //     ++iter;
+                                    //     iter_prev->set_zero();
+                                    // } else {
+                                    ++iter;
+                                        // }
                                 }
                             } else { //except
-                                if (!it->visited && is_need_shrink) {
-                                    tmp_hash_table.hash_table.insert(iter->get_value());
-                                }
+                                // if (!it->visited && is_need_shrink) {
+                                //     tmp_hash_table.hash_table.insert(iter->get_value());
+                                // }
                                 ++iter;
                             }
                         }
 
                         arg.inited = false;
-                        if (is_need_shrink) {
-                            arg.hash_table = std::move(tmp_hash_table.hash_table);
-                        }
+                        // if (is_need_shrink) {
+                        //     arg.hash_table = std::move(tmp_hash_table.hash_table);
+                        // }
                     } else {
                         LOG(FATAL) << "FATAL: Invalid RowRefList";
                     }

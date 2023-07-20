@@ -1053,7 +1053,7 @@ public:
         alloc(grower);
     }
 
-    void delete_zero_key(Key key) {
+    void delete_zero_key(const Key& key) {
         if (this->get_has_zero() && Cell::is_zero(key, *this)) {
             --m_size;
             this->clear_get_has_zero();
