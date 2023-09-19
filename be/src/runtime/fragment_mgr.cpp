@@ -1040,10 +1040,10 @@ void FragmentMgr::cancel_worker() {
                       << " queries need to be cancelled, coordinator dead.";
         }
 
-        for (const auto& qid : queries_to_cancel) {
-            cancel_query(qid, PPlanFragmentCancelReason::INTERNAL_ERROR,
-                         std::string("Coordinator dead."));
-        }
+        //        for (const auto& qid : queries_to_cancel) {
+        //            cancel_query(qid, PPlanFragmentCancelReason::INTERNAL_ERROR,
+        //                         std::string("Coordinator dead."));
+        //        }
     } while (!_stop_background_threads_latch.wait_for(std::chrono::seconds(1)));
     LOG(INFO) << "FragmentMgr cancel worker is going to exit.";
 }
