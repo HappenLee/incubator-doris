@@ -20,9 +20,13 @@
 
 #pragma once
 
+#include <span>
+
+#include "vec/common/arena.h"
 #include "vec/common/hash_table/hash.h"
 #include "vec/common/hash_table/hash_table.h"
 #include "vec/common/hash_table/hash_table_allocator.h"
+#include "vec/exec/join/join_op.h"
 /** NOTE HashMap could only be used for memmoveable (position independent) types.
   * Example: std::string is not position independent in libstdc++ with C++11 ABI or in libc++.
   * Also, key in hash table must be of type, that zero bytes is compared equals to zero key.
@@ -222,9 +226,148 @@ public:
     bool has_null_key_data() const { return false; }
 };
 
+template <typename Key, typename Cell, typename Hash = DefaultHash<Key>,
+          typename Grower = HashTableGrower<>, typename Allocator = HashTableAllocator>
+class JoinHashMapTable : public HashMapTable<Key, Cell, Hash, Grower, Allocator> {
+public:
+    using Self = JoinHashMapTable;
+    using Base = HashMapTable<Key, Cell, Hash, Grower, Allocator>;
+
+    using key_type = Key;
+    using value_type = typename Cell::value_type;
+    using mapped_type = typename Cell::Mapped;
+
+    using LookupResult = typename Base::LookupResult;
+
+    using HashMapTable<Key, Cell, Hash, Grower, Allocator>::HashMapTable;
+
+    void expanse_for_add_elem(size_t num_elem) {
+        bucket_size = calc_bucket_size(num_elem + 1);
+        first.resize(bucket_size, 0);
+        next.resize(num_elem + 1, 0);
+    }
+
+    static uint32_t calc_bucket_size(size_t num_elem) {
+        size_t expect_bucket_size = static_cast<size_t>(num_elem) + (num_elem - 1) / 7;
+        return phmap::priv::NormalizeCapacity(expect_bucket_size) + 1;
+    }
+
+    void build(std::span<Key> keys) {
+        build_keys = keys;
+        const auto num_elem = keys.size();
+        for (size_t i = 1; i < num_elem; i++) {
+            uint32_t bucket_num = Base::hash(keys[i]) & (bucket_size - 1);
+            next[i] = first[bucket_num];
+            first[bucket_num] = i;
+        }
+    }
+
+    uint32_t bucket_num(const Key& key) const { return Base::hash(key) & (bucket_size - 1); }
+
+    LookupResult ALWAYS_INLINE find(Key key) { return Base::find(key); }
+    LookupResult ALWAYS_INLINE find(Key x, size_t hash_value) { return Base::find(x, hash_value); }
+
+    auto find(Key* __restrict keys, uint32_t* __restrict bucket_nums, int probe_idx, int n,
+              std::vector<uint32_t>& probe_idxs, std::vector<int>& build_idxs) {
+        auto matched_cnt = 0;
+        while (probe_idx < n && matched_cnt < 4096) {
+            auto build_idx = first[bucket_nums[probe_idx]];
+            while (build_idx) {
+                if (keys[probe_idx] == build_keys[build_idx]) {
+                    probe_idxs[matched_cnt] = probe_idx;
+                    build_idxs[matched_cnt] = build_idx;
+                    matched_cnt++;
+                }
+                build_idx = next[build_idx];
+            }
+            probe_idx++;
+        }
+        return std::pair {probe_idx, matched_cnt};
+    }
+
+private:
+    uint32_t bucket_size = 0;
+    std::vector<uint32_t> first;
+    std::vector<uint32_t> next;
+    std::span<Key> build_keys;
+    Cell cell;
+    doris::vectorized::Arena* pool;
+
+    //    /// Merge every cell's value of current map into the destination map via emplace.
+    //    ///  Func should have signature void(Mapped & dst, Mapped & src, bool emplaced).
+    //    ///  Each filled cell in current map will invoke func once. If that map doesn't
+    //    ///  have a key equals to the given cell, a new cell gets emplaced into that map,
+    //    ///  and func is invoked with the third argument emplaced set to true. Otherwise
+    //    ///  emplaced is set to false.
+    //    template <typename Func>
+    //    void ALWAYS_INLINE merge_to_via_emplace(Self& that, Func&& func) {
+    //        for (auto it = this->begin(), end = this->end(); it != end; ++it) {
+    //            typename Self::LookupResult res_it;
+    //            bool inserted;
+    //            that.emplace(it->get_first(), res_it, inserted, it.get_hash());
+    //            func(*lookup_result_get_mapped(res_it), it->get_second(), inserted);
+    //        }
+    //    }
+    //
+    //    /// Merge every cell's value of current map into the destination map via find.
+    //    ///  Func should have signature void(Mapped & dst, Mapped & src, bool exist).
+    //    ///  Each filled cell in current map will invoke func once. If that map doesn't
+    //    ///  have a key equals to the given cell, func is invoked with the third argument
+    //    ///  exist set to false. Otherwise exist is set to true.
+    //    template <typename Func>
+    //    void ALWAYS_INLINE merge_to_via_find(Self& that, Func&& func) {
+    //        for (auto it = this->begin(), end = this->end(); it != end; ++it) {
+    //            auto res_it = that.find(it->get_first(), it.get_hash());
+    //            if (!res_it)
+    //                func(it->get_second(), it->get_second(), false);
+    //            else
+    //                func(*lookup_result_get_mapped(res_it), it->get_second(), true);
+    //        }
+    //    }
+    //
+    //    /// Call func(const Key &, Mapped &) for each hash map element.
+    //    template <typename Func>
+    //    void for_each_value(Func&& func) {
+    //        for (auto& v : *this) func(v.get_first(), v.get_second());
+    //    }
+    //
+    //    /// Call func(Mapped &) for each hash map element.
+    //    template <typename Func>
+    //    void for_each_mapped(Func&& func) {
+    //        for (auto& v : *this) func(v.get_second());
+    //    }
+    //
+    //    mapped_type& ALWAYS_INLINE operator[](Key x) {
+    //        typename HashMapTable::LookupResult it;
+    //        bool inserted;
+    //        this->emplace(x, it, inserted);
+    //
+    //        /** It may seem that initialization is not necessary for POD-types (or __has_trivial_constructor),
+    //          *  since the hash table memory is initially initialized with zeros.
+    //          * But, in fact, an empty cell may not be initialized with zeros in the following cases:
+    //          * - ZeroValueStorage (it only zeros the key);
+    //          * - after resizing and moving a part of the cells to the new half of the hash table, the old cells also have only the key to zero.
+    //          *
+    //          * On performance, there is almost always no difference, due to the fact that it->second is usually assigned immediately
+    //          *  after calling `operator[]`, and since `operator[]` is inlined, the compiler removes unnecessary initialization.
+    //          *
+    //          * Sometimes due to initialization, the performance even grows. This occurs in code like `++map[key]`.
+    //          * When we do the initialization, for new cells, it's enough to make `store 1` right away.
+    //          * And if we did not initialize, then even though there was zero in the cell,
+    //          *  the compiler can not guess about this, and generates the `load`, `increment`, `store` code.
+    //          */
+    //        if (inserted) new (lookup_result_get_mapped(it)) mapped_type();
+    //
+    //        return *lookup_result_get_mapped(it);
+    //    }
+    //
+    //    char* get_null_key_data() { return nullptr; }
+    //    bool has_null_key_data() const { return false; }
+};
+
 template <typename Key, typename Mapped, typename Hash = DefaultHash<Key>,
           typename Grower = HashTableGrower<>, typename Allocator = HashTableAllocator>
-using HashMap = HashMapTable<Key, HashMapCell<Key, Mapped, Hash>, Hash, Grower, Allocator>;
+using HashMap = JoinHashMapTable<Key, HashMapCell<Key, Mapped, Hash>, Hash, Grower, Allocator>;
 
 template <typename Key, typename Mapped, typename Hash = DefaultHash<Key>,
           typename Grower = HashTableGrower<>, typename Allocator = HashTableAllocator>

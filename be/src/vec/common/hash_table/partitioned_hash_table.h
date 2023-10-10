@@ -85,6 +85,7 @@ public:
     }
 
     size_t hash(const Key& x) const { return level0_sub_table.hash(x); }
+    uint32_t bucket_num(const Key& x) const { return level0_sub_table.bucket_num(x); }
 
     float get_factor() const { return MAX_SUB_TABLE_OCCUPANCY_FRACTION; }
 
@@ -386,6 +387,8 @@ public:
         }
     }
 
+    void build(auto& keys) { level0_sub_table.build(keys); }
+
     template <bool READ>
     void ALWAYS_INLINE prefetch_by_hash(size_t hash_value) {
         if (_is_partitioned) {
@@ -496,6 +499,11 @@ public:
     LookupResult ALWAYS_INLINE find(Key x) { return find(x, hash(x)); }
 
     ConstLookupResult ALWAYS_INLINE find(Key x) const { return find(x, hash(x)); }
+
+    auto find(Key* __restrict keys, uint32_t* __restrict bucket_nums, int probe_idx, int n,
+              std::vector<uint32_t>& probe_idxs, std::vector<int>& build_idxs) {
+        return level0_sub_table.find(keys, bucket_nums, probe_idx, n, probe_idxs, build_idxs);
+    }
 
     size_t size() const {
         if (_is_partitioned) {

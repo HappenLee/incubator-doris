@@ -166,7 +166,7 @@ struct ProcessHashTableBuild {
     template <bool ignore_null, bool short_circuit_for_null>
     Status run(HashTableContext& hash_table_ctx, ConstNullMapPtr null_map, bool* has_null_key) {
         using KeyGetter = typename HashTableContext::State;
-        using Mapped = typename HashTableContext::Mapped;
+        //        using Mapped = typename HashTableContext::Mapped;
 
         Defer defer {[&]() {
             int64_t bucket_size = hash_table_ctx.hash_table.get_buffer_size_in_cells();
@@ -195,18 +195,16 @@ struct ProcessHashTableBuild {
 
         KeyGetter key_getter(_build_raw_ptrs, _join_context->_build_key_sz, nullptr);
 
-        SCOPED_TIMER(_join_context->_build_table_insert_timer);
         hash_table_ctx.hash_table.reset_resize_timer();
-
         // only not build_unique, we need expanse hash table before insert data
         // 1. There are fewer duplicate keys, reducing the number of resize hash tables
         // can improve performance to a certain extent, about 2%-5%
         // 2. There are many duplicate keys, and the hash table filled bucket is far less than
         // the hash table build bucket, which may waste a lot of memory.
         // TODO, use the NDV expansion of the key column in the optimizer statistics
-        if (!_join_context->_build_unique) {
-            RETURN_IF_CATCH_EXCEPTION(hash_table_ctx.hash_table.expanse_for_add_elem(
-                    std::min<int>(_rows, config::hash_table_pre_expanse_max_rows)));
+        {
+            SCOPED_TIMER(_build_side_compute_hash_timer);
+            hash_table_ctx.hash_table.expanse_for_add_elem(_rows);
         }
 
         vector<int>& inserted_rows = _join_context->_inserted_rows[&_acquired_block];
@@ -223,87 +221,85 @@ struct ProcessHashTableBuild {
                                                           old_keys_memory);
         }
 
-        _build_side_hash_values.resize(_rows);
         auto& arena = *(_join_context->_arena);
         auto old_build_arena_memory = arena.size();
-        const auto& keys = key_getter.get_keys();
+        auto keys = key_getter.get_keys();
+        //        {
+        //            SCOPED_TIMER(_build_side_compute_hash_timer);
+        //            _build_side_hash_values.resize(_rows);
+        //            for (size_t k = 0; k < _rows; ++k) {
+        //                if constexpr (ignore_null) {
+        //                    if ((*null_map)[k]) {
+        //                        continue;
+        //                    }
+        //                }
+        //                // If apply short circuit strategy for null value (e.g. join operator is
+        //                // NULL_AWARE_LEFT_ANTI_JOIN), we build hash table until we meet a null value.
+        //                if constexpr (short_circuit_for_null) {
+        //                    if ((*null_map)[k]) {
+        //                        DCHECK(has_null_key);
+        //                        *has_null_key = true;
+        //                        return Status::OK();
+        //                    }
+        //                }
+        //                _build_side_hash_values[k] = hash_table_ctx.hash_table.hash(keys[k]);
+        //            }
+        //        }
+
+        //        bool build_unique = _join_context->_build_unique;
         {
-            SCOPED_TIMER(_build_side_compute_hash_timer);
-            for (size_t k = 0; k < _rows; ++k) {
-                if (k % CHECK_FRECUENCY == 0) {
-                    RETURN_IF_CANCELLED(_state);
-                }
-                if constexpr (ignore_null) {
-                    if ((*null_map)[k]) {
-                        if (has_null_key) {
-                            *has_null_key = true;
-                        }
-                        continue;
-                    }
-                }
-                // If apply short circuit strategy for null value (e.g. join operator is
-                // NULL_AWARE_LEFT_ANTI_JOIN), we build hash table until we meet a null value.
-                if constexpr (short_circuit_for_null) {
-                    if ((*null_map)[k]) {
-                        DCHECK(has_null_key);
-                        *has_null_key = true;
-                        return Status::OK();
-                    }
-                }
-                _build_side_hash_values[k] = hash_table_ctx.hash_table.hash(keys[k]);
-            }
-        }
+            SCOPED_TIMER(_join_context->_build_table_insert_timer);
+            hash_table_ctx.hash_table.build(keys);
 
-        bool build_unique = _join_context->_build_unique;
-#define EMPLACE_IMPL(stmt)                                                                    \
-    for (size_t k = 0; k < _rows; ++k) {                                                      \
-        if (k % CHECK_FRECUENCY == 0) {                                                       \
-            RETURN_IF_CANCELLED(_state);                                                      \
-        }                                                                                     \
-        if constexpr (ignore_null) {                                                          \
-            if ((*null_map)[k]) {                                                             \
-                continue;                                                                     \
-            }                                                                                 \
-        }                                                                                     \
-        auto emplace_result = key_getter.emplace_with_key(hash_table_ctx.hash_table, keys[k], \
-                                                          _build_side_hash_values[k]);        \
-        if (LIKELY(k + HASH_MAP_PREFETCH_DIST < _rows)) {                                     \
-            key_getter.template prefetch_by_hash<false>(                                      \
-                    hash_table_ctx.hash_table,                                                \
-                    _build_side_hash_values[k + HASH_MAP_PREFETCH_DIST]);                     \
-        }                                                                                     \
-        stmt;                                                                                 \
-    }
-
-        if (has_runtime_filter && build_unique) {
-            EMPLACE_IMPL(
-                    if (emplace_result.is_inserted()) {
-                        new (&emplace_result.get_mapped()) Mapped({k, _offset});
-                        inserted_rows.push_back(k);
-                    } else { _skip_rows++; });
-        } else if (has_runtime_filter && !build_unique) {
-            EMPLACE_IMPL(
-                    if (emplace_result.is_inserted()) {
-                        new (&emplace_result.get_mapped()) Mapped({k, _offset});
-                        inserted_rows.push_back(k);
-                    } else {
-                        emplace_result.get_mapped().insert({k, _offset}, *(_join_context->_arena));
-                        inserted_rows.push_back(k);
-                    });
-        } else if (!has_runtime_filter && build_unique) {
-            EMPLACE_IMPL(
-                    if (emplace_result.is_inserted()) {
-                        new (&emplace_result.get_mapped()) Mapped({k, _offset});
-                    } else { _skip_rows++; });
-        } else {
-            EMPLACE_IMPL(
-                    if (emplace_result.is_inserted()) {
-                        new (&emplace_result.get_mapped()) Mapped({k, _offset});
-                    } else {
-                        emplace_result.get_mapped().insert({k, _offset}, *(_join_context->_arena));
-                    });
+            //#define EMPLACE_IMPL(stmt)                                                                    \
+//    for (size_t k = 0; k < _rows; ++k) {                                                      \
+//        if (k % CHECK_FRECUENCY == 0) {                                                       \
+//            RETURN_IF_CANCELLED(_state);                                                      \
+//        }                                                                                     \
+//        if constexpr (ignore_null) {                                                          \
+//            if ((*null_map)[k]) {                                                             \
+//                continue;                                                                     \
+//            }                                                                                 \
+//        }                                                                                     \
+//        auto emplace_result = key_getter.emplace_with_key(hash_table_ctx.hash_table, keys[k], \
+//                                                          _build_side_hash_values[k]);        \
+//        if (LIKELY(k + HASH_MAP_PREFETCH_DIST < _rows)) {                                     \
+//            key_getter.template prefetch_by_hash<false>(                                      \
+//                    hash_table_ctx.hash_table,                                                \
+//                    _build_side_hash_values[k + HASH_MAP_PREFETCH_DIST]);                     \
+//        }                                                                                     \
+//        stmt;                                                                                 \
+//    }
+            //
+            //            if (has_runtime_filter && build_unique) {
+            //                EMPLACE_IMPL(
+            //                        if (emplace_result.is_inserted()) {
+            //                            new(&emplace_result.get_mapped()) Mapped({k, _offset});
+            //                            inserted_rows.push_back(k);
+            //                        } else { _skip_rows++; });
+            //            } else if (has_runtime_filter && !build_unique) {
+            //                EMPLACE_IMPL(
+            //                        if (emplace_result.is_inserted()) {
+            //                            new(&emplace_result.get_mapped()) Mapped({k, _offset});
+            //                            inserted_rows.push_back(k);
+            //                        } else {
+            //                            emplace_result.get_mapped().insert({k, _offset}, *(_join_context->_arena));
+            //                            inserted_rows.push_back(k);
+            //                        });
+            //            } else if (!has_runtime_filter && build_unique) {
+            //                EMPLACE_IMPL(
+            //                        if (emplace_result.is_inserted()) {
+            //                            new(&emplace_result.get_mapped()) Mapped({k, _offset});
+            //                        } else { _skip_rows++; });
+            //            } else {
+            //                EMPLACE_IMPL(
+            //                        if (emplace_result.is_inserted()) {
+            //                            new(&emplace_result.get_mapped()) Mapped({k, _offset});
+            //                        } else {
+            //                            emplace_result.get_mapped().insert({k, _offset}, *(_join_context->_arena));
+            //                        });
+            //            }
         }
-        _join_context->_build_rf_cardinality += inserted_rows.size();
 
         _join_context->_build_arena_memory_usage->add(arena.size() - old_build_arena_memory);
 

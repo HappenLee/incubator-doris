@@ -111,7 +111,7 @@ struct HashMethodString : public columns_hashing_impl::HashMethodBase<
         }
     }
 
-    const std::vector<StringRef>& get_keys() const { return keys; }
+    std::span<StringRef> get_keys() { return std::span(keys); }
 
 protected:
     friend class columns_hashing_impl::HashMethodBase<Self, Value, Mapped, use_cache>;
@@ -218,7 +218,7 @@ struct HashMethodKeysFixed
 
     Key pack_key_holder(Key key, Arena& pool) const { return key; }
 
-    const std::vector<Key>& get_keys() const { return keys; }
+    std::span<Key> get_keys() { return keys; }
 };
 
 template <typename SingleColumnMethod, typename Mapped, bool use_cache>

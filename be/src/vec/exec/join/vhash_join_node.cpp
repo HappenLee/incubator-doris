@@ -854,6 +854,9 @@ Status HashJoinNode::sink(doris::RuntimeState* state, vectorized::Block* in_bloc
 
         if (in_block->rows() != 0) {
             SCOPED_TIMER(_build_side_merge_block_timer);
+            if (_build_side_mutable_block.empty()) {
+                RETURN_IF_ERROR(_build_side_mutable_block.merge(*(in_block->create_same_struct_block(1, false))));
+            }
             RETURN_IF_ERROR(_build_side_mutable_block.merge(*in_block));
         }
 
@@ -879,7 +882,7 @@ Status HashJoinNode::sink(doris::RuntimeState* state, vectorized::Block* in_bloc
     }
 
     if (_should_build_hash_table && eos) {
-        if (!_build_side_mutable_block.empty()) {
+        if (_build_side_mutable_block.rows() > 1) {
             if (_build_blocks->size() == HASH_JOIN_MAX_BUILD_BLOCK_COUNT) {
                 return Status::NotSupported(strings::Substitute(
                         "data size of right table in hash join > $0",

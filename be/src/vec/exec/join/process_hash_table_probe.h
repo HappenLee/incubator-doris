@@ -104,7 +104,7 @@ struct ProcessHashTableProbe {
 
     std::vector<uint32_t> _probe_indexs;
     PaddedPODArray<int8_t> _build_block_offsets;
-    PaddedPODArray<int32_t> _build_block_rows;
+    std::vector<int> _build_block_rows;
     std::vector<std::pair<int8_t, int>> _build_blocks_locs;
     // only need set the tuple is null in RIGHT_OUTER_JOIN and FULL_OUTER_JOIN
     ColumnUInt8::Container* _tuple_is_null_left_flags;
@@ -114,7 +114,7 @@ struct ProcessHashTableProbe {
     size_t _serialized_key_buffer_size {0};
     uint8_t* _serialized_key_buffer;
     std::unique_ptr<Arena> _serialize_key_arena;
-    std::vector<size_t> _probe_side_hash_values;
+    std::vector<uint32_t> _probe_side_hash_values;
     std::vector<char> _probe_side_find_result;
 
     std::vector<bool*> _visited_map;

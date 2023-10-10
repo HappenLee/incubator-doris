@@ -228,8 +228,8 @@ KeyGetter ProcessHashTableProbe<JoinOpType>::_init_probe_side(size_t probe_rows,
         _visited_map.reserve(_batch_size * PROBE_SIDE_EXPLODE_RATE);
         _same_to_prev.reserve(_batch_size * PROBE_SIDE_EXPLODE_RATE);
     }
-    _probe_indexs.reserve(_batch_size * PROBE_SIDE_EXPLODE_RATE);
-    _build_block_rows.reserve(_batch_size * PROBE_SIDE_EXPLODE_RATE);
+    _probe_indexs.resize(_batch_size * PROBE_SIDE_EXPLODE_RATE);
+    _build_block_rows.resize(_batch_size * PROBE_SIDE_EXPLODE_RATE);
     _build_block_offsets.reserve(_batch_size * PROBE_SIDE_EXPLODE_RATE);
 
     KeyGetter key_getter(*_join_context->_probe_columns, _join_context->_probe_key_sz, nullptr);
@@ -259,7 +259,7 @@ void ProcessHashTableProbe<JoinOpType>::_probe_hash(const Keys& keys, HashTableT
                 continue;
             }
         }
-        _probe_side_hash_values[k] = hash_table_ctx.hash_table.hash(keys[k]);
+        _probe_side_hash_values[k] = hash_table_ctx.hash_table.bucket_num(keys[k]);
     }
     *_join_context->_ready_probe = true;
 }
@@ -314,14 +314,14 @@ Status ProcessHashTableProbe<JoinOpType>::do_process(HashTableType& hash_table_c
     auto& probe_index = *_join_context->_probe_index;
 
     using KeyGetter = typename HashTableType::State;
-    using Mapped = typename HashTableType::Mapped;
+    //    using Mapped = typename HashTableType::Mapped;
 
     KeyGetter key_getter = _init_probe_side<KeyGetter>(probe_rows, with_other_conjuncts);
 
     auto& mcol = mutable_block.mutable_columns();
 
-    constexpr auto is_right_semi_anti_join =
-            JoinOpType == TJoinOp::RIGHT_ANTI_JOIN || JoinOpType == TJoinOp::RIGHT_SEMI_JOIN;
+    //    constexpr auto is_right_semi_anti_join =
+    //            JoinOpType == TJoinOp::RIGHT_ANTI_JOIN || JoinOpType == TJoinOp::RIGHT_SEMI_JOIN;
 
     constexpr auto probe_all =
             JoinOpType == TJoinOp::LEFT_OUTER_JOIN || JoinOpType == TJoinOp::FULL_OUTER_JOIN;
@@ -332,8 +332,8 @@ Status ProcessHashTableProbe<JoinOpType>::do_process(HashTableType& hash_table_c
     bool all_match_one = true;
     size_t probe_size = 0;
 
-    auto& probe_row_match_iter = _probe_row_match<Mapped, with_other_conjuncts>(
-            current_offset, probe_index, probe_size, all_match_one);
+    //    auto& probe_row_match_iter = _probe_row_match<Mapped, with_other_conjuncts>(
+    //            current_offset, probe_index, probe_size, all_match_one);
 
     // If not(which means it excceed batch size), probe_index is not increased and
     // remaining matched rows for the current probe row will be
@@ -344,14 +344,14 @@ Status ProcessHashTableProbe<JoinOpType>::do_process(HashTableType& hash_table_c
     bool is_the_last_sub_block = false;
 
     if (with_other_conjuncts && probe_size != 0) {
-        is_the_last_sub_block = !probe_row_match_iter.ok();
+        //        is_the_last_sub_block = !probe_row_match_iter.ok();
         _same_to_prev.emplace_back(false);
         for (int i = 0; i < current_offset - 1; ++i) {
             _same_to_prev.emplace_back(true);
         }
     }
 
-    const auto& keys = key_getter.get_keys();
+    auto keys = key_getter.get_keys();
 
     _probe_hash<need_null_map_for_probe, HashTableType>(keys, hash_table_ctx, null_map);
 
@@ -362,8 +362,8 @@ Status ProcessHashTableProbe<JoinOpType>::do_process(HashTableType& hash_table_c
 
     {
         SCOPED_TIMER(_search_hashtable_timer);
-        using FindResult = decltype(key_getter.find_key(hash_table_ctx.hash_table, 0, *_arena));
-        FindResult empty = {nullptr, false};
+        //        using FindResult = decltype(key_getter.find_key(hash_table_ctx.hash_table, 0, *_arena));
+        //        FindResult empty = {nullptr, false};
         while (current_offset < _batch_size && probe_index < probe_rows) {
             if constexpr (ignore_null && need_null_map_for_probe) {
                 if ((*null_map)[probe_index]) {
@@ -384,26 +384,24 @@ Status ProcessHashTableProbe<JoinOpType>::do_process(HashTableType& hash_table_c
                 }
             }
 
-            const auto& find_result =
-                    need_null_map_for_probe && (*null_map)[probe_index]
-                            ? empty
-                            : key_getter.find_key_with_hash(hash_table_ctx.hash_table,
-                                                            _probe_side_hash_values[probe_index],
-                                                            keys[probe_index]);
-            if (LIKELY(probe_index + HASH_MAP_PREFETCH_DIST < probe_rows) &&
-                !(need_null_map_for_probe && (*null_map)[probe_index + HASH_MAP_PREFETCH_DIST])) {
-                key_getter.template prefetch_by_hash<true>(
-                        hash_table_ctx.hash_table,
-                        _probe_side_hash_values[probe_index + HASH_MAP_PREFETCH_DIST]);
-            }
+            auto [new_probe_idx, new_current_offset] = hash_table_ctx.hash_table.find(
+                    keys.data(), _probe_side_hash_values.data(), probe_index, probe_rows,
+                    _probe_indexs, _build_block_rows);
+            probe_index = new_probe_idx;
+            current_offset = new_current_offset;
+            //            if (LIKELY(probe_index + HASH_MAP_PREFETCH_DIST < probe_rows) &&
+            //                !(need_null_map_for_probe && (*null_map)[probe_index + HASH_MAP_PREFETCH_DIST])) {
+            //                key_getter.template prefetch_by_hash<true>(
+            //                        hash_table_ctx.hash_table,
+            //                        _probe_side_hash_values[probe_index + HASH_MAP_PREFETCH_DIST]);
+            //            }
 
-            auto current_probe_index = probe_index;
+            //            auto current_probe_index = probe_index;
             if constexpr (!with_other_conjuncts &&
                           (JoinOpType == TJoinOp::LEFT_ANTI_JOIN ||
                            JoinOpType == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN ||
                            JoinOpType == TJoinOp::LEFT_SEMI_JOIN)) {
-                bool need_go_ahead =
-                        (JoinOpType != TJoinOp::LEFT_SEMI_JOIN) ^ find_result.is_found();
+                bool need_go_ahead = (JoinOpType != TJoinOp::LEFT_SEMI_JOIN) ^ false;
                 if constexpr (is_mark_join) {
                     ++current_offset;
                     bool null_result =
@@ -418,75 +416,77 @@ Status ProcessHashTableProbe<JoinOpType>::do_process(HashTableType& hash_table_c
                     current_offset += need_go_ahead;
                 }
                 ++probe_index;
-            } else {
-                if (find_result.is_found()) {
-                    auto& mapped = find_result.get_mapped();
-                    auto origin_offset = current_offset;
-
-                    // For mark join, if euqual-matched tuple count for one probe row
-                    // excceeds batch size, it's difficult to implement the logic to
-                    // split them into multiple sub blocks and handle them, keep the original
-                    // logic for now.
-                    if constexpr (is_mark_join && with_other_conjuncts) {
-                        for (auto it = mapped.begin(); it.ok(); ++it) {
-                            _emplace_element(it->block_offset, it->row_num, current_offset);
-                            _visited_map.emplace_back(&it->visited);
-                        }
-                        ++probe_index;
-                    } else if constexpr (with_other_conjuncts || !is_right_semi_anti_join) {
-                        auto multi_match_last_offset = current_offset;
-                        auto it = mapped.begin();
-                        for (; it.ok() && current_offset < _batch_size; ++it) {
-                            _emplace_element(it->block_offset, it->row_num, current_offset);
-
-                            if constexpr (with_other_conjuncts) {
-                                _visited_map.emplace_back(&it->visited);
-                            }
-                        }
-                        probe_row_match_iter = it;
-                        if (!it.ok()) {
-                            // If all matched rows for the current probe row are handled,
-                            // advance to next probe row.
-                            // If not(which means it excceed batch size), probe_index is not increased and
-                            // remaining matched rows for the current probe row will be
-                            // handled in the next call of this function
-                            ++probe_index;
-                        } else if constexpr (with_other_conjuncts) {
-                            multi_matched_output_row_count =
-                                    current_offset - multi_match_last_offset;
-                        }
-                    } else {
-                        ++probe_index;
-                    }
-                    if constexpr (std::is_same_v<Mapped, RowRefListWithFlag>) {
-                        mapped.visited = true;
-                    }
-
-                    if constexpr (with_other_conjuncts) {
-                        _same_to_prev.emplace_back(false);
-                        for (int i = 0; i < current_offset - origin_offset - 1; ++i) {
-                            _same_to_prev.emplace_back(true);
-                        }
-                    }
-                } else if constexpr (probe_all || JoinOpType == TJoinOp::LEFT_ANTI_JOIN ||
-                                     JoinOpType == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN ||
-                                     (JoinOpType == TJoinOp::LEFT_SEMI_JOIN && is_mark_join)) {
-                    // only full outer / left outer need insert the data of right table
-                    _emplace_element(-1, -1, current_offset);
-
-                    if constexpr (with_other_conjuncts) {
-                        _same_to_prev.emplace_back(false);
-                        _visited_map.emplace_back(nullptr);
-                    }
-                    ++probe_index;
-                } else {
-                    ++probe_index;
-                }
             }
-            all_match_one &= (current_offset == _probe_indexs.size() + 1);
-            _probe_indexs.resize(current_offset, current_probe_index);
+            //            else {
+            //                if (find_result.is_found()) {
+            //                    auto& mapped = find_result.get_mapped();
+            //                    auto origin_offset = current_offset;
+            //
+            //                    // For mark join, if euqual-matched tuple count for one probe row
+            //                    // excceeds batch size, it's difficult to implement the logic to
+            //                    // split them into multiple sub blocks and handle them, keep the original
+            //                    // logic for now.
+            //                    if constexpr (is_mark_join && with_other_conjuncts) {
+            //                        for (auto it = mapped.begin(); it.ok(); ++it) {
+            //                            _emplace_element(it->block_offset, it->row_num, current_offset);
+            //                            _visited_map.emplace_back(&it->visited);
+            //                        }
+            //                        ++probe_index;
+            //                    } else if constexpr (with_other_conjuncts || !is_right_semi_anti_join) {
+            //                        auto multi_match_last_offset = current_offset;
+            //                        auto it = mapped.begin();
+            //                        for (; it.ok() && current_offset < _batch_size; ++it) {
+            //                            _emplace_element(it->block_offset, it->row_num, current_offset);
+            //
+            //                            if constexpr (with_other_conjuncts) {
+            //                                _visited_map.emplace_back(&it->visited);
+            //                            }
+            //                        }
+            //                        probe_row_match_iter = it;
+            //                        if (!it.ok()) {
+            //                            // If all matched rows for the current probe row are handled,
+            //                            // advance to next probe row.
+            //                            // If not(which means it excceed batch size), probe_index is not increased and
+            //                            // remaining matched rows for the current probe row will be
+            //                            // handled in the next call of this function
+            //                            ++probe_index;
+            //                        } else if constexpr (with_other_conjuncts) {
+            //                            multi_matched_output_row_count =
+            //                                    current_offset - multi_match_last_offset;
+            //                        }
+            //                    } else {
+            //                        ++probe_index;
+            //                    }
+            //                    if constexpr (std::is_same_v<Mapped, RowRefListWithFlag>) {
+            //                        mapped.visited = true;
+            //                    }
+            //
+            //                    if constexpr (with_other_conjuncts) {
+            //                        _same_to_prev.emplace_back(false);
+            //                        for (int i = 0; i < current_offset - origin_offset - 1; ++i) {
+            //                            _same_to_prev.emplace_back(true);
+            //                        }
+            //                    }
+            //                } else if constexpr (probe_all || JoinOpType == TJoinOp::LEFT_ANTI_JOIN ||
+            //                                     JoinOpType == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN ||
+            //                                     (JoinOpType == TJoinOp::LEFT_SEMI_JOIN && is_mark_join)) {
+            //                    // only full outer / left outer need insert the data of right table
+            //                    _emplace_element(-1, -1, current_offset);
+            //
+            //                    if constexpr (with_other_conjuncts) {
+            //                        _same_to_prev.emplace_back(false);
+            //                        _visited_map.emplace_back(nullptr);
+            //                    }
+            //                    ++probe_index;
+            //                } else {
+            //                    ++probe_index;
+            //                }
+            //            }
+            //            all_match_one &= (current_offset == _probe_indexs.size() + 1);
+            //            _probe_indexs.resize(current_offset, current_probe_index);
         }
-        probe_size = probe_index - last_probe_index + probe_row_match_iter.ok();
+        //        probe_size = probe_index - last_probe_index + probe_row_match_iter.ok();
+        probe_size = probe_index - last_probe_index;
     }
 
     build_side_output_column(mcol, *_join_context->_right_output_slot_flags, current_offset,
