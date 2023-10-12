@@ -121,7 +121,7 @@ HashJoinProbeContext::HashJoinProbeContext(HashJoinNode* join_node)
           _arena(join_node->_arena),
           _outer_join_pull_visited_iter(&join_node->_outer_join_pull_visited_iter),
           _probe_row_match_iter(&join_node->_probe_row_match_iter),
-          _build_blocks(join_node->_build_blocks),
+          _build_block(join_node->_build_block),
           _probe_block(&join_node->_probe_block),
           _probe_columns(&join_node->_probe_columns),
           _probe_index(&join_node->_probe_index),
@@ -151,7 +151,7 @@ HashJoinProbeContext::HashJoinProbeContext(pipeline::HashJoinProbeLocalState* lo
           _arena(local_state->_shared_state->arena),
           _outer_join_pull_visited_iter(&local_state->_shared_state->outer_join_pull_visited_iter),
           _probe_row_match_iter(&local_state->_shared_state->probe_row_match_iter),
-          _build_blocks(local_state->_shared_state->build_blocks),
+          _build_block(local_state->_shared_state->build_block),
           _probe_block(&local_state->_probe_block),
           _probe_columns(&local_state->_probe_columns),
           _probe_index(&local_state->_probe_index),
@@ -211,12 +211,6 @@ HashJoinNode::HashJoinNode(ObjectPool* pool, const TPlanNode& tnode, const Descr
     _arena = std::make_shared<Arena>();
     _hash_table_variants = std::make_shared<HashTableVariants>();
     _process_hashtable_ctx_variants = std::make_unique<HashTableCtxVariants>();
-    _build_blocks.reset(new std::vector<Block>());
-
-    // avoid vector expand change block address.
-    // one block can store 4g data, _build_blocks can store 128*4g data.
-    // if probe data bigger than 512g, runtime filter maybe will core dump when insert data.
-    _build_blocks->reserve(HASH_JOIN_MAX_BUILD_BLOCK_COUNT);
 }
 
 Status HashJoinNode::init(const TPlanNode& tnode, RuntimeState* state) {
@@ -838,10 +832,6 @@ Status HashJoinNode::_materialize_build_side(RuntimeState* state) {
 
 Status HashJoinNode::sink(doris::RuntimeState* state, vectorized::Block* in_block, bool eos) {
     SCOPED_TIMER(_build_timer);
-
-    // make one block for each 4 gigabytes
-    constexpr static auto BUILD_BLOCK_MAX_SIZE = 4 * 1024UL * 1024UL * 1024UL;
-
     if (_has_null_in_build_side) {
         // TODO: if _has_null_in_build_side is true we should finish current pipeline task.
         DCHECK(state->enable_pipeline_exec());
@@ -855,43 +845,25 @@ Status HashJoinNode::sink(doris::RuntimeState* state, vectorized::Block* in_bloc
         if (in_block->rows() != 0) {
             SCOPED_TIMER(_build_side_merge_block_timer);
             if (_build_side_mutable_block.empty()) {
-                RETURN_IF_ERROR(_build_side_mutable_block.merge(*(in_block->create_same_struct_block(1, false))));
+                RETURN_IF_ERROR(_build_side_mutable_block.merge(
+                        *(in_block->create_same_struct_block(1, false))));
             }
             RETURN_IF_ERROR(_build_side_mutable_block.merge(*in_block));
-        }
 
-        if (UNLIKELY(_build_side_mem_used - _build_side_last_mem_used > BUILD_BLOCK_MAX_SIZE)) {
-            if (_build_blocks->size() == HASH_JOIN_MAX_BUILD_BLOCK_COUNT) {
-                return Status::NotSupported(strings::Substitute(
-                        "data size of right table in hash join > $0",
-                        BUILD_BLOCK_MAX_SIZE * HASH_JOIN_MAX_BUILD_BLOCK_COUNT));
+            if (_build_side_mutable_block.rows() > std::numeric_limits<uint32_t>::max()) {
+                return Status::NotSupported(
+                        "Hash join do not support build table rows"
+                        " over:" +
+                        std::to_string(std::numeric_limits<uint32_t>::max()));
             }
-            _build_blocks->emplace_back(_build_side_mutable_block.to_block());
-
-            COUNTER_UPDATE(_build_blocks_memory_usage, (*_build_blocks)[_build_block_idx].bytes());
-
-            // TODO:: Rethink may we should do the process after we receive all build blocks ?
-            // which is better.
-            RETURN_IF_ERROR(_process_build_block(state, (*_build_blocks)[_build_block_idx],
-                                                 _build_block_idx));
-
-            _build_side_mutable_block = MutableBlock();
-            ++_build_block_idx;
-            _build_side_last_mem_used = _build_side_mem_used;
         }
     }
 
     if (_should_build_hash_table && eos) {
-        if (_build_side_mutable_block.rows() > 1) {
-            if (_build_blocks->size() == HASH_JOIN_MAX_BUILD_BLOCK_COUNT) {
-                return Status::NotSupported(strings::Substitute(
-                        "data size of right table in hash join > $0",
-                        BUILD_BLOCK_MAX_SIZE * HASH_JOIN_MAX_BUILD_BLOCK_COUNT));
-            }
-            _build_blocks->emplace_back(_build_side_mutable_block.to_block());
-            COUNTER_UPDATE(_build_blocks_memory_usage, (*_build_blocks)[_build_block_idx].bytes());
-            RETURN_IF_ERROR(_process_build_block(state, (*_build_blocks)[_build_block_idx],
-                                                 _build_block_idx));
+        if (!_build_side_mutable_block.empty()) {
+            _build_block = std::make_shared<Block>(_build_side_mutable_block.to_block());
+            COUNTER_UPDATE(_build_blocks_memory_usage, _build_block->bytes());
+            RETURN_IF_ERROR(_process_build_block(state, *_build_block));
         }
         auto ret = std::visit(Overload {[&](std::monostate&) -> Status {
                                             LOG(FATAL) << "FATAL: uninited hash table";
@@ -916,7 +888,7 @@ Status HashJoinNode::sink(doris::RuntimeState* state, vectorized::Block* in_bloc
             _shared_hash_table_context->status = Status::OK();
             // arena will be shared with other instances.
             _shared_hash_table_context->arena = _arena;
-            _shared_hash_table_context->blocks = _build_blocks;
+            _shared_hash_table_context->block = _build_block;
             _shared_hash_table_context->hash_table_variants = _hash_table_variants;
             _shared_hash_table_context->short_circuit_for_null_in_probe_side =
                     _has_null_in_build_side;
@@ -939,7 +911,7 @@ Status HashJoinNode::sink(doris::RuntimeState* state, vectorized::Block* in_bloc
         _has_null_in_build_side = _shared_hash_table_context->short_circuit_for_null_in_probe_side;
         _hash_table_variants = std::static_pointer_cast<HashTableVariants>(
                 _shared_hash_table_context->hash_table_variants);
-        _build_blocks = _shared_hash_table_context->blocks;
+        _build_block = _shared_hash_table_context->block;
 
         if (!_shared_hash_table_context->runtime_filters.empty()) {
             auto ret = std::visit(
@@ -972,7 +944,7 @@ Status HashJoinNode::sink(doris::RuntimeState* state, vectorized::Block* in_bloc
 
     // Since the comparison of null values is meaningless, null aware left anti join should not output null
     // when the build side is not empty.
-    if (!_build_blocks->empty() && _join_op == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) {
+    if (_build_block && _join_op == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) {
         _probe_ignore_null = true;
     }
     _init_short_circuit_for_probe();
@@ -1071,7 +1043,7 @@ void HashJoinNode::_set_build_ignore_flag(Block& block, const std::vector<int>& 
     }
 }
 
-Status HashJoinNode::_process_build_block(RuntimeState* state, Block& block, uint8_t offset) {
+Status HashJoinNode::_process_build_block(RuntimeState* state, Block& block) {
     SCOPED_TIMER(_build_table_timer);
     size_t rows = block.rows();
     if (UNLIKELY(rows == 0)) {
@@ -1114,8 +1086,7 @@ Status HashJoinNode::_process_build_block(RuntimeState* state, Block& block, uin
                         using HashTableCtxType = std::decay_t<decltype(arg)>;
                         HashJoinBuildContext context(this);
                         ProcessHashTableBuild<HashTableCtxType> hash_table_build_process(
-                                rows, block, raw_ptrs, &context, state->batch_size(), offset,
-                                state);
+                                rows, block, raw_ptrs, &context, state->batch_size(), state);
                         return hash_table_build_process
                                 .template run<has_null_value, short_circuit_for_null_in_build_side>(
                                         arg,

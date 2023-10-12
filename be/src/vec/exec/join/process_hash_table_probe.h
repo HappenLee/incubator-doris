@@ -98,7 +98,7 @@ struct ProcessHashTableProbe {
 
     vectorized::HashJoinProbeContext* _join_context;
     const int _batch_size;
-    const std::vector<Block>& _build_blocks;
+    const Block& _build_block;
     std::unique_ptr<Arena> _arena;
     std::vector<StringRef> _probe_keys;
 

@@ -60,7 +60,7 @@ struct SharedHashTableContext {
     Status status;
     std::shared_ptr<Arena> arena;
     std::shared_ptr<void> hash_table_variants;
-    std::shared_ptr<std::vector<Block>> blocks;
+    std::shared_ptr<Block> block;
     std::map<int, SharedRuntimeFilterContext> runtime_filters;
     bool signaled;
     bool short_circuit_for_null_in_probe_side;

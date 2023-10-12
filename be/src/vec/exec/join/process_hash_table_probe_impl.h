@@ -32,7 +32,7 @@ ProcessHashTableProbe<JoinOpType>::ProcessHashTableProbe(HashJoinProbeContext* j
                                                          int batch_size)
         : _join_context(join_context),
           _batch_size(batch_size),
-          _build_blocks(*join_context->_build_blocks),
+          _build_block(*join_context->_build_block),
           _tuple_is_null_left_flags(
                   join_context->_is_outer_join
                           ? &(reinterpret_cast<ColumnUInt8&>(
@@ -66,51 +66,13 @@ void ProcessHashTableProbe<JoinOpType>::build_side_output_column(
             JoinOpType == TJoinOp::LEFT_OUTER_JOIN || JoinOpType == TJoinOp::FULL_OUTER_JOIN;
 
     if (!is_semi_anti_join || have_other_join_conjunct) {
-        if (_build_blocks.size() == 1) {
-            for (int i = 0; i < _right_col_len; i++) {
-                auto& column = *_build_blocks[0].get_by_position(i).column;
-                if (output_slot_flags[i]) {
-                    mcol[i + _right_col_idx]->insert_indices_from(column, _build_block_rows.data(),
-                                                                  _build_block_rows.data() + size);
-                } else {
-                    mcol[i + _right_col_idx]->insert_many_defaults(size);
-                }
-            }
-        } else {
-            for (int i = 0; i < _right_col_len; i++) {
-                if (output_slot_flags[i]) {
-                    for (int j = 0; j < size; j++) {
-                        if constexpr (probe_all) {
-                            if (_build_block_offsets[j] == -1) {
-                                DCHECK(mcol[i + _right_col_idx]->is_nullable());
-                                assert_cast<ColumnNullable*>(mcol[i + _right_col_idx].get())
-                                        ->insert_default();
-                            } else {
-                                auto& column = *_build_blocks[_build_block_offsets[j]]
-                                                        .get_by_position(i)
-                                                        .column;
-                                mcol[i + _right_col_idx]->insert_from(column, _build_block_rows[j]);
-                            }
-                        } else {
-                            if (_build_block_offsets[j] == -1) {
-                                // the only case to reach here:
-                                // 1. left anti join with other conjuncts, and
-                                // 2. equal conjuncts does not match
-                                // since nullptr is emplaced back to visited_map,
-                                // the output value of the build side does not matter,
-                                // just insert default value
-                                mcol[i + _right_col_idx]->insert_default();
-                            } else {
-                                auto& column = *_build_blocks[_build_block_offsets[j]]
-                                                        .get_by_position(i)
-                                                        .column;
-                                mcol[i + _right_col_idx]->insert_from(column, _build_block_rows[j]);
-                            }
-                        }
-                    }
-                } else {
-                    mcol[i + _right_col_idx]->insert_many_defaults(size);
-                }
+        for (int i = 0; i < _right_col_len; i++) {
+            const auto& column = *_build_block.get_by_position(i).column;
+            if (output_slot_flags[i]) {
+                mcol[i + _right_col_idx]->insert_indices_from(column, _build_block_rows.data(),
+                                                              _build_block_rows.data() + size);
+            } else {
+                mcol[i + _right_col_idx]->insert_many_defaults(size);
             }
         }
     }
@@ -962,37 +924,19 @@ Status ProcessHashTableProbe<JoinOpType>::process_data_in_hashtable(HashTableTyp
 
         auto insert_build_rows = [&](int8_t offset) {
             for (size_t j = 0; j < right_col_len; ++j) {
-                auto& column = *_build_blocks[offset].get_by_position(j).column;
+                const auto& column = *_build_block.get_by_position(j).column;
                 mcol[j + right_col_idx]->insert_indices_from(
                         column, _build_block_rows.data(),
                         _build_block_rows.data() + _build_block_rows.size());
             }
         };
-        if (_build_blocks.size() > 1) {
-            std::sort(_build_blocks_locs.begin(), _build_blocks_locs.end(),
-                      [](const auto a, const auto b) { return a.first > b.first; });
-            auto start = 0, end = 0;
-            while (start < _build_blocks_locs.size()) {
-                while (end < _build_blocks_locs.size() &&
-                       _build_blocks_locs[start].first == _build_blocks_locs[end].first) {
-                    end++;
-                }
-                auto offset = _build_blocks_locs[start].first;
-                _build_block_rows.resize(end - start);
-                for (int i = 0; start + i < end; i++) {
-                    _build_block_rows[i] = _build_blocks_locs[start + i].second;
-                }
-                start = end;
-                insert_build_rows(offset);
-            }
-        } else if (_build_blocks.size() == 1) {
-            const auto size = _build_blocks_locs.size();
-            _build_block_rows.resize(_build_blocks_locs.size());
-            for (int i = 0; i < size; i++) {
-                _build_block_rows[i] = _build_blocks_locs[i].second;
-            }
-            insert_build_rows(0);
+
+        const auto size = _build_blocks_locs.size();
+        _build_block_rows.resize(_build_blocks_locs.size());
+        for (int i = 0; i < size; i++) {
+            _build_block_rows[i] = _build_blocks_locs[i].second;
         }
+        insert_build_rows(0);
 
         // just resize the left table column in case with other conjunct to make block size is not zero
         if (_join_context->_is_right_semi_anti && _join_context->_have_other_join_conjunct) {

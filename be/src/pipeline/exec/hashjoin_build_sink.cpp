@@ -41,7 +41,6 @@ Overload(Callables&&... callables) -> Overload<Callables...>;
 HashJoinBuildSinkLocalState::HashJoinBuildSinkLocalState(DataSinkOperatorXBase* parent,
                                                          RuntimeState* state)
         : JoinBuildSinkLocalState(parent, state),
-          _build_block_idx(0),
           _build_side_mem_used(0),
           _build_side_last_mem_used(0) {}
 
@@ -53,11 +52,7 @@ Status HashJoinBuildSinkLocalState::init(RuntimeState* state, LocalSinkStateInfo
     auto& p = _parent->cast<HashJoinBuildSinkOperatorX>();
     _shared_state->join_op_variants = p._join_op_variants;
     _shared_state->probe_key_sz = p._build_key_sz;
-    _shared_state->build_blocks.reset(new std::vector<vectorized::Block>());
-    // avoid vector expand change block address.
-    // one block can store 4g data, _build_blocks can store 128*4g data.
-    // if probe data bigger than 512g, runtime filter maybe will core dump when insert data.
-    _shared_state->build_blocks->reserve(vectorized::HASH_JOIN_MAX_BUILD_BLOCK_COUNT);
+
     _shared_state->is_null_safe_eq_join = p._is_null_safe_eq_join;
     _shared_state->store_null_in_hash_table = p._store_null_in_hash_table;
     _build_expr_ctxs.resize(p._build_expr_ctxs.size());
@@ -140,17 +135,17 @@ void HashJoinBuildSinkLocalState::init_short_circuit_for_probe() {
     auto& p = _parent->cast<HashJoinBuildSinkOperatorX>();
     _shared_state->short_circuit_for_probe =
             (_has_null_in_build_side && p._join_op == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) ||
-            (_shared_state->build_blocks->empty() && p._join_op == TJoinOp::INNER_JOIN &&
+            (!_shared_state->build_block && p._join_op == TJoinOp::INNER_JOIN &&
              !p._is_mark_join) ||
-            (_shared_state->build_blocks->empty() && p._join_op == TJoinOp::LEFT_SEMI_JOIN &&
+            (!_shared_state->build_block && p._join_op == TJoinOp::LEFT_SEMI_JOIN &&
              !p._is_mark_join) ||
-            (_shared_state->build_blocks->empty() && p._join_op == TJoinOp::RIGHT_OUTER_JOIN) ||
-            (_shared_state->build_blocks->empty() && p._join_op == TJoinOp::RIGHT_SEMI_JOIN) ||
-            (_shared_state->build_blocks->empty() && p._join_op == TJoinOp::RIGHT_ANTI_JOIN);
+            (!_shared_state->build_block && p._join_op == TJoinOp::RIGHT_OUTER_JOIN) ||
+            (!_shared_state->build_block && p._join_op == TJoinOp::RIGHT_SEMI_JOIN) ||
+            (!_shared_state->build_block && p._join_op == TJoinOp::RIGHT_ANTI_JOIN);
 }
 
 Status HashJoinBuildSinkLocalState::process_build_block(RuntimeState* state,
-                                                        vectorized::Block& block, uint8_t offset) {
+                                                        vectorized::Block& block) {
     auto& p = _parent->cast<HashJoinBuildSinkOperatorX>();
     SCOPED_TIMER(_build_table_timer);
     size_t rows = block.rows();
@@ -196,7 +191,7 @@ Status HashJoinBuildSinkLocalState::process_build_block(RuntimeState* state,
                         vectorized::HashJoinBuildContext context(this);
                         vectorized::ProcessHashTableBuild<HashTableCtxType>
                                 hash_table_build_process(rows, block, raw_ptrs, &context,
-                                                         state->batch_size(), offset, state);
+                                                         state->batch_size(), state);
                         return hash_table_build_process
                                 .template run<has_null_value, short_circuit_for_null_in_build_side>(
                                         arg,
@@ -449,9 +444,6 @@ Status HashJoinBuildSinkOperatorX::sink(RuntimeState* state, vectorized::Block* 
     SCOPED_TIMER(local_state.profile()->total_time_counter());
     COUNTER_UPDATE(local_state.rows_input_counter(), (int64_t)in_block->rows());
 
-    // make one block for each 4 gigabytes
-    constexpr static auto BUILD_BLOCK_MAX_SIZE = 4 * 1024UL * 1024UL * 1024UL;
-
     if (local_state._has_null_in_build_side) {
         // TODO: if _has_null_in_build_side is true we should finish current pipeline task.
         DCHECK(state->enable_pipeline_exec());
@@ -464,52 +456,30 @@ Status HashJoinBuildSinkOperatorX::sink(RuntimeState* state, vectorized::Block* 
 
         if (in_block->rows() != 0) {
             SCOPED_TIMER(local_state._build_side_merge_block_timer);
-            RETURN_IF_ERROR(local_state._build_side_mutable_block.merge(*in_block));
-        }
-
-        if (UNLIKELY(local_state._build_side_mem_used - local_state._build_side_last_mem_used >
-                     BUILD_BLOCK_MAX_SIZE)) {
-            if (local_state._shared_state->build_blocks->size() ==
-                vectorized::HASH_JOIN_MAX_BUILD_BLOCK_COUNT) {
-                return Status::NotSupported(strings::Substitute(
-                        "data size of right table in hash join > $0",
-                        BUILD_BLOCK_MAX_SIZE * vectorized::HASH_JOIN_MAX_BUILD_BLOCK_COUNT));
+            if (local_state._build_side_mutable_block.empty()) {
+                RETURN_IF_ERROR(local_state._build_side_mutable_block.merge(
+                        *(in_block->create_same_struct_block(1, false))));
             }
-            local_state._shared_state->build_blocks->emplace_back(
-                    local_state._build_side_mutable_block.to_block());
+            RETURN_IF_ERROR(local_state._build_side_mutable_block.merge(*in_block));
 
-            COUNTER_UPDATE(local_state._build_blocks_memory_usage,
-                           (*local_state._shared_state->build_blocks)[local_state._build_block_idx]
-                                   .bytes());
-
-            // TODO:: Rethink may we should do the process after we receive all build blocks ?
-            // which is better.
-            RETURN_IF_ERROR(local_state.process_build_block(
-                    state, (*local_state._shared_state->build_blocks)[local_state._build_block_idx],
-                    local_state._build_block_idx));
-
-            local_state._build_side_mutable_block = vectorized::MutableBlock();
-            ++local_state._build_block_idx;
-            local_state._build_side_last_mem_used = local_state._build_side_mem_used;
+            if (local_state._build_side_mutable_block.rows() >
+                std::numeric_limits<uint32_t>::max()) {
+                return Status::NotSupported(
+                        "Hash join do not support build table rows"
+                        " over:" +
+                        std::to_string(std::numeric_limits<uint32_t>::max()));
+            }
         }
     }
 
     if (local_state._should_build_hash_table && source_state == SourceState::FINISHED) {
         if (!local_state._build_side_mutable_block.empty()) {
-            if (local_state._shared_state->build_blocks->size() ==
-                vectorized::HASH_JOIN_MAX_BUILD_BLOCK_COUNT) {
-                return Status::NotSupported(strings::Substitute(
-                        "data size of right table in hash join > $0",
-                        BUILD_BLOCK_MAX_SIZE * vectorized::HASH_JOIN_MAX_BUILD_BLOCK_COUNT));
-            }
-            local_state._shared_state->build_blocks->emplace_back(
+            local_state._shared_state->build_block = std::make_shared<vectorized::Block>(
                     local_state._build_side_mutable_block.to_block());
             COUNTER_UPDATE(local_state._build_blocks_memory_usage,
-                           (*local_state._shared_state->build_blocks)[local_state._build_block_idx]
-                                   .bytes());
+                           (*local_state._shared_state->build_block).bytes());
             RETURN_IF_ERROR(local_state.process_build_block(
-                    state, (*local_state._shared_state->build_blocks)[local_state._build_block_idx],
-                    local_state._build_block_idx));
+                    state, (*local_state._shared_state->build_block)));
         }
         auto ret = std::visit(Overload {[&](std::monostate&) -> Status {
                                             LOG(FATAL) << "FATAL: uninited hash table";
@@ -534,7 +504,7 @@ Status HashJoinBuildSinkOperatorX::sink(RuntimeState* state, vectorized::Block* 
             _shared_hash_table_context->status = Status::OK();
             // arena will be shared with other instances.
             _shared_hash_table_context->arena = local_state._shared_state->arena;
-            _shared_hash_table_context->blocks = local_state._shared_state->build_blocks;
+            _shared_hash_table_context->block = local_state._shared_state->build_block;
             _shared_hash_table_context->hash_table_variants =
                     local_state._shared_state->hash_table_variants;
             _shared_hash_table_context->short_circuit_for_null_in_probe_side =
@@ -561,7 +531,7 @@ Status HashJoinBuildSinkOperatorX::sink(RuntimeState* state, vectorized::Block* 
         local_state._shared_state->hash_table_variants =
                 std::static_pointer_cast<vectorized::HashTableVariants>(
                         _shared_hash_table_context->hash_table_variants);
-        local_state._shared_state->build_blocks = _shared_hash_table_context->blocks;
+        local_state._shared_state->build_block = _shared_hash_table_context->block;
 
         if (!_shared_hash_table_context->runtime_filters.empty()) {
             auto ret = std::visit(
@@ -595,7 +565,7 @@ Status HashJoinBuildSinkOperatorX::sink(RuntimeState* state, vectorized::Block* 
     if (source_state == SourceState::FINISHED) {
         // Since the comparison of null values is meaningless, null aware left anti join should not output null
         // when the build side is not empty.
-        if (!local_state._shared_state->build_blocks->empty() &&
+        if (local_state._shared_state->build_block &&
             _join_op == TJoinOp::NULL_AWARE_LEFT_ANTI_JOIN) {
             local_state._shared_state->probe_ignore_null = true;
         }
