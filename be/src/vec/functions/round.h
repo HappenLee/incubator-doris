@@ -433,6 +433,10 @@ struct Dispatcher {
     static ColumnPtr apply_vec_const(const IColumn* col_general, Int16 scale_arg) {
         if constexpr (IsNumber<T>) {
             const auto* const col = check_and_get_column<ColumnVector<T>>(col_general);
+            if (col == nullptr) {
+                throw doris::Exception(ErrorCode::INTERNAL_ERROR, "Illegal column");
+            }
+
             auto col_res = ColumnVector<T>::create();
 
             typename ColumnVector<T>::Container& vec_res = col_res->get_data();
@@ -456,6 +460,10 @@ struct Dispatcher {
             return col_res;
         } else if constexpr (IsDecimalNumber<T>) {
             const auto* const decimal_col = check_and_get_column<ColumnDecimal<T>>(col_general);
+            if (decimal_col == nullptr) {
+                throw doris::Exception(ErrorCode::INTERNAL_ERROR, "Illegal column");
+            }
+
             const auto& vec_src = decimal_col->get_data();
 
             UInt32 result_scale =
@@ -720,7 +728,7 @@ public:
                     res = Dispatcher<FieldType, rounding_mode, tie_breaking_mode>::apply_vec_const(
                             col_general, scale_arg);
 
-                    if (arguments.size() == 2 && is_col_general_const) {
+                    if (is_col_general_const) {
                         // Important, make sure the result column has the same size as the input column
                         res = ColumnConst::create(std::move(res), input_rows_count);
                     }

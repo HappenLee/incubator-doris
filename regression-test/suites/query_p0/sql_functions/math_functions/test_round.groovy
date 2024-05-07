@@ -15,7 +15,8 @@
 // specific language governing permissions and limitations
 // under the License.
 
-    suite("test_round") {
+suite("test_round") {
+    sql "set enable_fold_constant_by_be=false;"
     qt_select "SELECT round(10.12345)"
     qt_select "SELECT round(10.12345, 2)"
     qt_select "SELECT round_bankers(10.12345)"

@@ -16,6 +16,8 @@
 // under the License.
 
 suite("test_function_truncate") {
+    sql """set enable_fold_constant_by_be=false;"""
+
     // NOTICE: This single const argument test should never cause BE crash,
     // like branch2.0's behavior, so we added it to check.
     qt_sql """SELECT truncate(10.12345), truncate(cast(10.12345 as decimal(7, 5)));"""
@@ -28,6 +30,14 @@ suite("test_function_truncate") {
     """
     qt_sql """
         SELECT number, truncate(123.123, 0) FROM numbers("number"="10");
+    """
+
+    qt_sql """
+        SELECT truncate(123.123);
+    """
+
+    qt_sql """
+        SELECT number, truncate(123.123) FROM numbers("number"="10");
     """
 
     // const_const, result scale should be 10
