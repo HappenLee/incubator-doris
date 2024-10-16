@@ -1436,6 +1436,11 @@ DECLARE_mBool(enable_pipeline_task_leakage_detect);
 // MB
 DECLARE_Int32(query_cache_size);
 
+// use which connection type to connect brpc service
+DECLARE_String(brpc_connection_type);
+
+DECLARE_mBool(enable_brpc_failed_reconnected);
+
 #ifdef BE_TEST
 // test s3
 DECLARE_String(test_s3_resource);
