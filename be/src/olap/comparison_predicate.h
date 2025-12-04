@@ -119,10 +119,6 @@ public:
     }
 
     bool evaluate_and(const std::pair<WrapperField*, WrapperField*>& statistic) const override {
-        if (statistic.first->is_null()) {
-            return true;
-        }
-
         T tmp_min_value = get_zone_map_value<Type, T>(statistic.first->cell_ptr());
         T tmp_max_value = get_zone_map_value<Type, T>(statistic.second->cell_ptr());
 
