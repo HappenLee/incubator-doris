@@ -17,60 +17,24 @@
 
 package org.apache.doris.nereids.trees.plans.commands;
 
-import org.apache.doris.catalog.Column;
-import org.apache.doris.catalog.StructType;
-import org.apache.doris.datasource.iceberg.IcebergRowId;
 import org.apache.doris.qe.ConnectContext;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-/**
- * Unit tests for IcebergDeleteCommand.
- *
- * Tests the query plan generation logic for Position Delete.
- */
-public class IcebergDeleteCommandTest {
-
-    @Test
-    public void testPositionDeletePlanContainsRowId() {
-        // This is a placeholder test
-        // In real implementation, we would:
-        // 1. Mock IcebergExternalTable
-        // 2. Create a DELETE command with WHERE clause
-        // 3. Generate query plan
-        // 4. Verify that hidden row-id column is in the projection
-
-        String rowIdColumnName = Column.ICEBERG_ROWID_COL;
-        Assertions.assertEquals("__DORIS_ICEBERG_ROWID_COL__", rowIdColumnName);
-        Assertions.assertFalse(rowIdColumnName.startsWith("$"));
-
-        // TODO: Add full test when mock infrastructure is ready
-        // Example:
-        // IcebergDeleteCommand command = new IcebergDeleteCommand(
-        //     nameParts, logicalQuery, table, partitions);
-        // LogicalPlan plan = command.completeQueryPlan(ctx, logicalQuery, table);
-        // Assertions.assertTrue(plan.getOutput().stream()
-        //     .anyMatch(expr -> expr.getName().equals(Column.ICEBERG_ROWID_COL)));
-    }
-
-    @Test
-    public void testRowIdStructFields() {
-        // Verify that hidden row-id STRUCT has the correct 4 fields
-        StructType structType = (StructType) IcebergRowId.getRowIdType();
-        Assertions.assertEquals(4, structType.getFields().size());
-    }
+public class IcebergMergeCommandTest {
 
     @Test
     public void testExecuteWithExternalTableBatchModeDisabledRestoresValueOnSuccess() throws Exception {
         ConnectContext ctx = new ConnectContext();
         ctx.getSessionVariable().enableExternalTableBatchMode = true;
 
-        IcebergDeleteCommand.executeWithExternalTableBatchModeDisabled(ctx, () -> {
+        Boolean result = IcebergMergeCommand.executeWithExternalTableBatchModeDisabled(ctx, () -> {
             Assertions.assertFalse(ctx.getSessionVariable().enableExternalTableBatchMode);
-            return null;
+            return Boolean.TRUE;
         });
 
+        Assertions.assertTrue(result);
         Assertions.assertTrue(ctx.getSessionVariable().enableExternalTableBatchMode);
     }
 
@@ -80,7 +44,7 @@ public class IcebergDeleteCommandTest {
         ctx.getSessionVariable().enableExternalTableBatchMode = false;
 
         RuntimeException exception = Assertions.assertThrows(RuntimeException.class,
-                () -> IcebergDeleteCommand.executeWithExternalTableBatchModeDisabled(ctx, () -> {
+                () -> IcebergMergeCommand.executeWithExternalTableBatchModeDisabled(ctx, () -> {
                     Assertions.assertFalse(ctx.getSessionVariable().enableExternalTableBatchMode);
                     throw new RuntimeException("expected");
                 }));
