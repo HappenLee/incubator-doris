@@ -205,13 +205,11 @@ TEST(function_array_element_test, element_at_const_int32_array_varying_index) {
         idx_data->insert_value(v);
     }
     auto idx_null_map = ColumnUInt8::create(N, 0);
-    auto idx_col =
-            ColumnNullable::create(std::move(idx_data), std::move(idx_null_map));
+    auto idx_col = ColumnNullable::create(std::move(idx_data), std::move(idx_null_map));
     auto idx_type = make_nullable(std::make_shared<DataTypeInt32>());
 
     auto result_type = make_nullable(std::make_shared<DataTypeInt32>());
-    auto result =
-            run_element_at(const_arr, arr_type, std::move(idx_col), idx_type, result_type, N);
+    auto result = run_element_at(const_arr, arr_type, std::move(idx_col), idx_type, result_type, N);
 
     ASSERT_EQ(result->size(), N);
     const auto& nr = assert_cast<const ColumnNullable&>(*result);
@@ -222,7 +220,7 @@ TEST(function_array_element_test, element_at_const_int32_array_varying_index) {
         Int32 val;
     };
     const Expected expected[N] = {{false, 10}, {false, 20}, {false, 30}, {true, 0},
-                                   {false, 30}, {false, 10}, {true, 0},   {true, 0}};
+                                  {false, 30}, {false, 10}, {true, 0},   {true, 0}};
     for (size_t i = 0; i < N; ++i) {
         EXPECT_EQ(nr.is_null_at(i), expected[i].is_null) << "row " << i;
         if (!expected[i].is_null) {
@@ -252,13 +250,11 @@ TEST(function_array_element_test, element_at_const_null_array) {
         idx_data->insert_value(v);
     }
     auto idx_null_map = ColumnUInt8::create(N, 0);
-    auto idx_col =
-            ColumnNullable::create(std::move(idx_data), std::move(idx_null_map));
+    auto idx_col = ColumnNullable::create(std::move(idx_data), std::move(idx_null_map));
     auto idx_type = make_nullable(std::make_shared<DataTypeInt32>());
 
     auto result_type = make_nullable(std::make_shared<DataTypeInt32>());
-    auto result =
-            run_element_at(const_arr, arr_type, std::move(idx_col), idx_type, result_type, N);
+    auto result = run_element_at(const_arr, arr_type, std::move(idx_col), idx_type, result_type, N);
 
     ASSERT_EQ(result->size(), N);
     const auto& nr = assert_cast<const ColumnNullable&>(*result);
@@ -281,13 +277,11 @@ TEST(function_array_element_test, element_at_const_array_null_index) {
     }
     // All indices are NULL
     auto idx_null_map = ColumnUInt8::create(N, 1 /*null*/);
-    auto idx_col =
-            ColumnNullable::create(std::move(idx_data), std::move(idx_null_map));
+    auto idx_col = ColumnNullable::create(std::move(idx_data), std::move(idx_null_map));
     auto idx_type = make_nullable(std::make_shared<DataTypeInt32>());
 
     auto result_type = make_nullable(std::make_shared<DataTypeInt32>());
-    auto result =
-            run_element_at(const_arr, arr_type, std::move(idx_col), idx_type, result_type, N);
+    auto result = run_element_at(const_arr, arr_type, std::move(idx_col), idx_type, result_type, N);
 
     ASSERT_EQ(result->size(), N);
     const auto& nr = assert_cast<const ColumnNullable&>(*result);
@@ -309,13 +303,11 @@ TEST(function_array_element_test, element_at_const_string_array_varying_index) {
         idx_data->insert_value(v);
     }
     auto idx_null_map = ColumnUInt8::create(N, 0);
-    auto idx_col =
-            ColumnNullable::create(std::move(idx_data), std::move(idx_null_map));
+    auto idx_col = ColumnNullable::create(std::move(idx_data), std::move(idx_null_map));
     auto idx_type = make_nullable(std::make_shared<DataTypeInt32>());
 
     auto result_type = make_nullable(std::make_shared<DataTypeString>());
-    auto result =
-            run_element_at(const_arr, arr_type, std::move(idx_col), idx_type, result_type, N);
+    auto result = run_element_at(const_arr, arr_type, std::move(idx_col), idx_type, result_type, N);
 
     ASSERT_EQ(result->size(), N);
     const auto& nr = assert_cast<const ColumnNullable&>(*result);
@@ -327,7 +319,7 @@ TEST(function_array_element_test, element_at_const_string_array_varying_index) {
     EXPECT_EQ(str_col.get_data_at(1), "world");
     EXPECT_FALSE(nr.is_null_at(2));
     EXPECT_EQ(str_col.get_data_at(2), std::string_view("", 0));
-    EXPECT_TRUE(nr.is_null_at(3));  // index 4 is out of bounds
+    EXPECT_TRUE(nr.is_null_at(3)); // index 4 is out of bounds
     EXPECT_FALSE(nr.is_null_at(4));
     EXPECT_EQ(str_col.get_data_at(4), std::string_view("", 0)); // -1 → last = ""
 }
@@ -348,13 +340,11 @@ TEST(function_array_element_test, element_at_const_array_large_batch) {
         idx_data->insert_value(static_cast<Int32>(i % 4 + 1));
     }
     auto idx_null_map = ColumnUInt8::create(N, 0);
-    auto idx_col =
-            ColumnNullable::create(std::move(idx_data), std::move(idx_null_map));
+    auto idx_col = ColumnNullable::create(std::move(idx_data), std::move(idx_null_map));
     auto idx_type = make_nullable(std::make_shared<DataTypeInt32>());
 
     auto result_type = make_nullable(std::make_shared<DataTypeInt32>());
-    auto result =
-            run_element_at(const_arr, arr_type, std::move(idx_col), idx_type, result_type, N);
+    auto result = run_element_at(const_arr, arr_type, std::move(idx_col), idx_type, result_type, N);
 
     ASSERT_EQ(result->size(), N);
     const auto& nr = assert_cast<const ColumnNullable&>(*result);
