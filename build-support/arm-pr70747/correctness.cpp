@@ -74,7 +74,16 @@ TEST(UrlKernel, RandomBytesDirectionsAndSymbolSets) {
             for (int symbols : {0, 1, 3, 5}) {
                 for (int mode = 0; mode < 4; ++mode) {
                     auto expected = reference_search(data.data() + offset, size, symbols, mode);
-                    EXPECT_EQ(expected, before_search(data.data() + offset, size, symbols, mode));
+                    // The old x86 template cannot instantiate an empty symbol set.
+#if defined(__aarch64__)
+                    constexpr bool baseline_supports_empty = true;
+#else
+                    constexpr bool baseline_supports_empty = false;
+#endif
+                    if (symbols != 0 || baseline_supports_empty) {
+                        EXPECT_EQ(expected,
+                                  before_search(data.data() + offset, size, symbols, mode));
+                    }
                     EXPECT_EQ(expected, after_search(data.data() + offset, size, symbols, mode));
                 }
             }

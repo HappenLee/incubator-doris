@@ -68,6 +68,11 @@ for variant, revision in (("before", BASE), ("after", HEAD)):
         + '\n'.join(x for x in includes if 'nmmintrin.h' not in x)
         + f'\nnamespace {variant}_url {{\n' + header + '\n}\n')
 
+    empty_case = 'case 0: return search<>(data, size, mode);'
+    if variant == "before":
+        # The baseline's empty compile-time set fails to instantiate on x86.
+        # Keep that unsupported case out of the wrapper; tests skip only that baseline case.
+        empty_case = '#if defined(__aarch64__)\n' + empty_case + '\n#endif'
     (out / f"{variant}_url.cpp").write_text(f'''#include "api.h"
 #include "{variant}_url.h"
 template<char... Symbols>
@@ -84,7 +89,7 @@ ptrdiff_t search(const char* data, size_t size, int mode) {{
 }}
 ptrdiff_t {variant}_search(const char* data, size_t size, int symbols, int mode) {{
     switch (symbols) {{
-    case 0: return search<>(data, size, mode);
+    {empty_case}
     case 1: return search<'.'>(data, size, mode);
     case 3: return search<'.', '/', '?'>(data, size, mode);
     case 5: return search<'.', '/', '?', ':', '#'>(data, size, mode);
