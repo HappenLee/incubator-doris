@@ -151,7 +151,8 @@ TEST_F(Md5Test, batch_block_padding_boundaries) {
 }
 
 TEST_F(Md5Test, batch_size_boundaries) {
-    const std::vector<size_t> counts = {0, 1, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33, 47, 48, 49};
+    const std::vector<size_t> counts = {0,  1,  2,  3,  4,  5,  7,  8,  9,
+                                        15, 16, 17, 31, 32, 33, 47, 48, 49};
     const std::vector<size_t> boundary_lengths = {0, 1, 55, 56, 57, 63, 64, 65, 119, 120, 121};
 
     for (size_t count : counts) {

@@ -43,6 +43,17 @@ void md5_to_hex(const unsigned char* digest, char* out) {
     }
 }
 
+#ifndef __AVX2__
+void md5_hex_batch_serial(const unsigned char* const inputs[], const size_t lengths[],
+                          char* outputs, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+        unsigned char digest[MD5_DIGEST_LENGTH];
+        MD5(lengths[i] == 0 ? &MD5_DUMMY_INPUT : inputs[i], lengths[i], digest);
+        md5_to_hex(digest, outputs + i * MD5_HEX_LENGTH);
+    }
+}
+#endif
+
 #if defined(__AVX2__) || defined(__aarch64__)
 
 constexpr uint32_t MD5_A0 = 0x67452301;
@@ -72,6 +83,8 @@ size_t md5_pad_final_blocks(const unsigned char* data, size_t len, unsigned char
 struct AVX2MD5Ops {
     using Vec = __m256i;
     static constexpr size_t LANES = 8;
+
+    static bool prefer_serial(size_t, size_t) { return false; }
 
     static Vec add(Vec a, Vec b) { return _mm256_add_epi32(a, b); }
 
@@ -150,6 +163,11 @@ using NativeMD5Ops = AVX2MD5Ops;
 struct NeonMD5Ops {
     using Vec = uint32x4_t;
     static constexpr size_t LANES = 4;
+
+    static bool prefer_serial(size_t total_blocks, size_t max_blocks) {
+        // A long message keeps both SIMD groups running after shorter lanes finish.
+        return max_blocks > total_blocks / LANES;
+    }
 
     static Vec add(Vec a, Vec b) { return vaddq_u32(a, b); }
     static Vec set1(uint32_t v) { return vdupq_n_u32(v); }
@@ -317,9 +335,17 @@ void md5_multi_buffer_compute(const unsigned char* const inputs[], const size_t 
 
     size_t num_blocks[2 * N];
     size_t max_blocks = 0;
+    size_t total_blocks = 0;
     for (size_t i = 0; i < count; ++i) {
         num_blocks[i] = md5_num_blocks(lengths[i]);
         max_blocks = std::max(max_blocks, num_blocks[i]);
+        total_blocks += num_blocks[i];
+    }
+    if (Ops::prefer_serial(total_blocks, max_blocks)) {
+        for (size_t i = 0; i < count; ++i) {
+            MD5(inputs[i], lengths[i], outputs + i * MD5_DIGEST_LENGTH);
+        }
+        return;
     }
     for (size_t i = count; i < 2 * N; ++i) {
         num_blocks[i] = 1;
@@ -442,6 +468,14 @@ void md5_hex_batch(const unsigned char* const inputs[], const size_t lengths[], 
         return;
     }
 
+#if defined(__aarch64__) && !defined(__AVX2__)
+    // A partial NEON vector cannot amortize the two-group setup and digest allocation.
+    if (count < NativeMD5Ops::LANES) {
+        md5_hex_batch_serial(inputs, lengths, outputs, count);
+        return;
+    }
+#endif
+
 #if defined(__AVX2__) || defined(__aarch64__)
     std::vector<unsigned char> digests(count * MD5_DIGEST_LENGTH);
     md5_binary_batch<NativeMD5Ops>(inputs, lengths, digests.data(), count);
@@ -449,11 +483,7 @@ void md5_hex_batch(const unsigned char* const inputs[], const size_t lengths[], 
         md5_to_hex(digests.data() + i * MD5_DIGEST_LENGTH, outputs + i * MD5_HEX_LENGTH);
     }
 #else
-    for (size_t i = 0; i < count; ++i) {
-        unsigned char digest[MD5_DIGEST_LENGTH];
-        MD5(lengths[i] == 0 ? &MD5_DUMMY_INPUT : inputs[i], lengths[i], digest);
-        md5_to_hex(digest, outputs + i * MD5_HEX_LENGTH);
-    }
+    md5_hex_batch_serial(inputs, lengths, outputs, count);
 #endif
 }
 
