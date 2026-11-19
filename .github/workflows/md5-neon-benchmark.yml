@@ -10,7 +10,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [ubuntu-24.04-arm, ubuntu-24.04]
+        include:
+          - runner: ubuntu-24.04-arm
+            compiler: g++-14
+          - runner: ubuntu-24.04-arm
+            compiler: clang++-20
+          - runner: ubuntu-24.04
+            compiler: clang++-20
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 20
     steps:
@@ -19,31 +25,38 @@ jobs:
           persist-credentials: false
       - name: Install standalone test dependencies
         run: |
+          if [ "${{ matrix.compiler }}" = clang++-20 ]; then
+            curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+            echo 'deb https://apt.llvm.org/noble/ llvm-toolchain-noble-20 main' | sudo tee /etc/apt/sources.list.d/llvm20.list
+          fi
           sudo apt-get update -qq
           sudo apt-get install -y g++-14 libssl-dev libgtest-dev libbenchmark-dev libfmt-dev libgoogle-glog-dev libgflags-dev
+          if [ "${{ matrix.compiler }}" = clang++-20 ]; then
+            sudo apt-get install -y clang-20 libclang-rt-20-dev
+          fi
       - name: Record environment
         run: |
           mkdir -p md5-results
           uname -a > md5-results/environment.txt
           lscpu >> md5-results/environment.txt
-          g++-14 --version >> md5-results/environment.txt
+          ${{ matrix.compiler }} --version >> md5-results/environment.txt
           openssl version -a >> md5-results/environment.txt
           git rev-parse HEAD >> md5-results/environment.txt
       - name: Compile and run isolated MD5 unit tests with sanitizers
         run: |
           ISA=-mavx2
           if [ "$(uname -m)" = aarch64 ]; then ISA=-march=armv8-a+crc; fi
-          g++-14 -std=c++23 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer "$ISA" -Wno-deprecated-declarations -Ibe/src be/src/util/md5.cpp be/test/util/md5_test.cpp -lgtest_main -lgtest -lcrypto -lfmt -lglog -lgflags -pthread -o md5-ut
+          ${{ matrix.compiler }} -std=c++23 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer "$ISA" -Wno-deprecated-declarations -Ibe/src be/src/util/md5.cpp be/test/util/md5_test.cpp -lgtest_main -lgtest -lcrypto -lfmt -lglog -lgflags -pthread -o md5-ut
           ASAN_OPTIONS=detect_leaks=1 ./md5-ut --gtest_filter='Md5Test.*' --gtest_output=xml:md5-results/unit.xml | tee md5-results/unit.log
       - name: Build and run release microbenchmark
         run: |
           ISA=-mavx2
           if [ "$(uname -m)" = aarch64 ]; then ISA=-march=armv8-a+crc; fi
           printf '#include "benchmark_md5.hpp"\nBENCHMARK_MAIN();\n' > md5-bench-main.cpp
-          g++-14 -std=c++23 -O3 -DNDEBUG "$ISA" -Wno-deprecated-declarations -Ibe/src -Ibe/benchmark be/src/util/md5.cpp md5-bench-main.cpp -lbenchmark -lcrypto -lfmt -lglog -lgflags -pthread -o md5-bench
+          ${{ matrix.compiler }} -std=c++23 -O3 -DNDEBUG "$ISA" -Wno-deprecated-declarations -Ibe/src -Ibe/benchmark be/src/util/md5.cpp md5-bench-main.cpp -lbenchmark -lcrypto -lfmt -lglog -lgflags -pthread -o md5-bench
           taskset -c 0 ./md5-bench --benchmark_min_time=0.15s --benchmark_repetitions=7 --benchmark_enable_random_interleaving=true --benchmark_out=md5-results/benchmark.json --benchmark_out_format=json > md5-results/benchmark.log 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: md5-${{ matrix.runner }}
+          name: md5-${{ matrix.runner }}-${{ matrix.compiler }}
           path: md5-results/
