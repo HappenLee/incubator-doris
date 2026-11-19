@@ -1,0 +1,58 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: PR 70747 ARM direct and inline URL recheck
+on:
+  push:
+    branches: [ci/pr70747-arm-direct]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++-14, clang++-20]
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+          persist-credentials: false
+      - name: Fetch exact baseline and PR head
+        run: |
+          git fetch --no-tags --depth=1 https://github.com/apache/doris.git fda8d83426ae45bdf1bfef2f331846bbe9af7826 a2a4709571873e475699d69787b0da8a486ae6a7
+      - name: Install test dependencies
+        run: |
+          if [ "${{ matrix.compiler }}" = clang++-20 ]; then
+            curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null
+            echo 'deb https://apt.llvm.org/noble/ llvm-toolchain-noble-20 main' | sudo tee /etc/apt/sources.list.d/llvm20.list
+          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y g++-14 libgtest-dev libbenchmark-dev
+          if [ "${{ matrix.compiler }}" = clang++-20 ]; then
+            sudo apt-get install -y clang-20 libclang-rt-20-dev
+          fi
+      - name: Native ARM URL direct and inline controlled comparison
+        run: bash build-support/arm-pr70747/run-arm-direct.sh '${{ matrix.compiler }}'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr70747-arm-direct-${{ matrix.compiler }}
+          path: arm70747-direct-results/
