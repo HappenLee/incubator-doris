@@ -20,27 +20,27 @@ jobs:
       - name: Install standalone test dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y clang-18 libssl-dev libgtest-dev libbenchmark-dev libfmt-dev libgoogle-glog-dev libgflags-dev
+          sudo apt-get install -y g++-14 libssl-dev libgtest-dev libbenchmark-dev libfmt-dev libgoogle-glog-dev libgflags-dev
       - name: Record environment
         run: |
           mkdir -p md5-results
           uname -a > md5-results/environment.txt
           lscpu >> md5-results/environment.txt
-          clang++-18 --version >> md5-results/environment.txt
+          g++-14 --version >> md5-results/environment.txt
           openssl version -a >> md5-results/environment.txt
           git rev-parse HEAD >> md5-results/environment.txt
       - name: Compile and run isolated MD5 unit tests with sanitizers
         run: |
           ISA=-mavx2
           if [ "$(uname -m)" = aarch64 ]; then ISA=-march=armv8-a+crc; fi
-          clang++-18 -std=c++23 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer "$ISA" -Wno-deprecated-declarations -Ibe/src be/src/util/md5.cpp be/test/util/md5_test.cpp -lgtest_main -lgtest -lcrypto -lfmt -lglog -lgflags -pthread -o md5-ut
+          g++-14 -std=c++23 -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer "$ISA" -Wno-deprecated-declarations -Ibe/src be/src/util/md5.cpp be/test/util/md5_test.cpp -lgtest_main -lgtest -lcrypto -lfmt -lglog -lgflags -pthread -o md5-ut
           ASAN_OPTIONS=detect_leaks=1 ./md5-ut --gtest_filter='Md5Test.*' --gtest_output=xml:md5-results/unit.xml | tee md5-results/unit.log
       - name: Build and run release microbenchmark
         run: |
           ISA=-mavx2
           if [ "$(uname -m)" = aarch64 ]; then ISA=-march=armv8-a+crc; fi
           printf '#include "benchmark_md5.hpp"\nBENCHMARK_MAIN();\n' > md5-bench-main.cpp
-          clang++-18 -std=c++23 -O3 -DNDEBUG "$ISA" -Wno-deprecated-declarations -Ibe/src -Ibe/benchmark be/src/util/md5.cpp md5-bench-main.cpp -lbenchmark -lcrypto -lfmt -lglog -lgflags -pthread -o md5-bench
+          g++-14 -std=c++23 -O3 -DNDEBUG "$ISA" -Wno-deprecated-declarations -Ibe/src -Ibe/benchmark be/src/util/md5.cpp md5-bench-main.cpp -lbenchmark -lcrypto -lfmt -lglog -lgflags -pthread -o md5-bench
           taskset -c 0 ./md5-bench --benchmark_min_time=0.15s --benchmark_repetitions=7 --benchmark_enable_random_interleaving=true --benchmark_out=md5-results/benchmark.json --benchmark_out_format=json > md5-results/benchmark.log 2>&1
       - uses: actions/upload-artifact@v4
         if: always()
