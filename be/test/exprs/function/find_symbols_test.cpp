@@ -32,12 +32,24 @@ TEST(FindSymbolsTest, ForwardAndReverseAtVectorBoundaries) {
         char* end = begin + length;
         EXPECT_EQ(end, find_first_symbols<'.'>(begin, end));
         EXPECT_EQ(nullptr, find_last_symbols_or_null<'.'>(begin, end));
-        EXPECT_EQ(end, (find_first_not_symbols<'x', '\0'>(begin, end)));
-        EXPECT_EQ(nullptr, (find_last_not_symbols_or_null<'x', '\0'>(begin, end)));
         for (char* pos = begin; pos != end; ++pos) {
             *pos = '.';
             EXPECT_EQ(pos, find_first_symbols<'.'>(begin, end));
             EXPECT_EQ(pos, find_last_symbols_or_null<'.'>(begin, end));
+            *pos = 'x';
+        }
+    }
+}
+
+TEST(FindSymbolsTest, NegativeSearchAtEveryPosition) {
+    for (size_t length = 0; length <= 65; ++length) {
+        std::string input(length, 'x');
+        char* begin = input.data();
+        char* end = begin + length;
+        EXPECT_EQ(end, (find_first_not_symbols<'x', '\0'>(begin, end)));
+        EXPECT_EQ(nullptr, (find_last_not_symbols_or_null<'x', '\0'>(begin, end)));
+        for (char* pos = begin; pos != end; ++pos) {
+            *pos = '.';
             EXPECT_EQ(pos, (find_first_not_symbols<'x', '\0'>(begin, end)));
             EXPECT_EQ(pos, (find_last_not_symbols_or_null<'x', '\0'>(begin, end)));
             *pos = 'x';

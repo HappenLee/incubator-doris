@@ -164,11 +164,21 @@ inline const char* find_first_symbols_sse2(const char* const begin, const char* 
     const char* pos = begin;
 
 #if defined(__aarch64__)
-    // Avoid NEON mask extraction when a delimiter occurs in the first few bytes.
-    // Keep the vector start unchanged so a miss still uses full 16-byte blocks.
-    if (end - pos >= 16) {
-        for (int i = 0; i < 4; ++i) {
-            if (maybe_negate<positive>(is_in<symbols...>(pos[i]))) return pos + i;
+    // Check the first byte before the vector-length test to keep immediate matches cheap.
+    if (pos != end) {
+        if (maybe_negate<positive>(is_in<symbols...>(*pos))) {
+            return pos;
+        }
+        if (end - pos >= 16) {
+            // Probe nearby delimiters without shifting the subsequent full vector blocks.
+            for (int i = 1; i < 4; ++i) {
+                if (maybe_negate<positive>(is_in<symbols...>(pos[i]))) {
+                    return pos + i;
+                }
+            }
+        } else {
+            // The scalar tail need not check the first byte again.
+            ++pos;
         }
     }
 #endif
@@ -218,11 +228,22 @@ inline const char* find_last_symbols_sse2(const char* const begin, const char* c
     const char* pos = end;
 
 #if defined(__aarch64__)
-    // A suffix such as ".com" needs only four scalar comparisons to find its dot.
-    // Keep the vector end unchanged so a miss still uses full 16-byte blocks.
-    if (pos - begin >= 16) {
-        for (int i = 1; i <= 4; ++i) {
-            if (maybe_negate<positive>(is_in<symbols...>(pos[-i]))) return pos - i;
+    // Check the last byte before the vector-length test to keep immediate matches cheap.
+    if (pos != begin) {
+        if (maybe_negate<positive>(is_in<symbols...>(pos[-1]))) {
+            return pos - 1;
+        }
+        if (pos - begin >= 16) {
+            // A suffix such as ".com" needs only four scalar comparisons to find its dot.
+            // Keep the vector end unchanged so a miss still uses full 16-byte blocks.
+            for (int i = 2; i <= 4; ++i) {
+                if (maybe_negate<positive>(is_in<symbols...>(pos[-i]))) {
+                    return pos - i;
+                }
+            }
+        } else {
+            // The scalar tail need not check the last byte again.
+            --pos;
         }
     }
 #endif
