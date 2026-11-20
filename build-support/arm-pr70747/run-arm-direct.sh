@@ -26,7 +26,6 @@ curl -fsSL --retry 3 https://github.com/DLTcollab/sse2neon/archive/refs/tags/v1.
 echo 'dce28eb6a78f45bf98740d5fad73febb  arm70747-deps/sse2neon.tar.gz' | md5sum -c -
 tar -xzf arm70747-deps/sse2neon.tar.gz -C arm70747-deps
 python3 build-support/arm-pr70747/prepare.py > "${result_dir}/source-manifest.json"
-python3 build-support/arm-pr70747/prepare-url-control.py
 cp -r arm70747-generated build-support/arm-pr70747 "${result_dir}/"
 cp .github/workflows/pr70747-arm-direct.yml "${result_dir}/workflow.yml"
 uname -a > "${result_dir}/environment.txt"
@@ -38,7 +37,8 @@ includes=(-Ibe/src -Ibuild-support/arm-pr70747 -Iarm70747-generated
           -Iarm70747-deps/sse2neon-1.6.0)
 common=(-std=c++23 -march=armv8-a+crc)
 sources=(arm70747-generated/before_filter.cpp arm70747-generated/after_filter.cpp
-         arm70747-generated/before_url.cpp arm70747-generated/after_url.cpp)
+         arm70747-generated/before_url.cpp arm70747-generated/after_url.cpp
+         arm70747-generated/candidate_filter.cpp arm70747-generated/candidate_url.cpp)
 "${compiler}" "${common[@]}" -O2 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
     "${includes[@]}" "${sources[@]}" build-support/arm-pr70747/correctness.cpp \
     be/test/exprs/function/find_symbols_test.cpp -lgtest_main -lgtest -pthread -o arm70747-ut
@@ -59,7 +59,7 @@ ASAN_OPTIONS=detect_leaks=1 ./arm70747-direct-asan --benchmark_min_time=0.001s \
     build-support/arm-pr70747/url-arm-diagnostic.cpp -o "${result_dir}/diagnostic.s"
 objdump -d -C --no-show-raw-insn arm70747-direct > "${result_dir}/disassembly.txt"
 for trial in 1 2; do
-    taskset -c 0 ./arm70747-direct --benchmark_min_time=0.05s --benchmark_repetitions=9 \
+    taskset -c 0 ./arm70747-direct --benchmark_min_time=0.02s --benchmark_repetitions=7 \
         --benchmark_enable_random_interleaving=true \
         --benchmark_out="${result_dir}/trial-${trial}.json" --benchmark_out_format=json \
         > "${result_dir}/trial-${trial}.log" 2>&1

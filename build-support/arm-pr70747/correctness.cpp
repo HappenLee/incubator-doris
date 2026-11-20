@@ -41,6 +41,7 @@ TEST(FilterKernel, BoundariesAlignmentAndSignedValues) {
                 }
                 FilterView view {data.data() + offset, size};
                 EXPECT_EQ(expected, before_count(view)) << size << "/" << offset;
+                EXPECT_EQ(expected, candidate_count(view));
                 EXPECT_EQ(expected, after_count(view)) << size << "/" << offset;
             }
         }
@@ -85,6 +86,7 @@ TEST(UrlKernel, RandomBytesDirectionsAndSymbolSets) {
                                   before_search(data.data() + offset, size, symbols, mode));
                     }
                     EXPECT_EQ(expected, after_search(data.data() + offset, size, symbols, mode));
+                    EXPECT_EQ(expected, candidate_search(data.data() + offset, size, symbols, mode));
                 }
             }
         }
@@ -101,6 +103,7 @@ TEST(UrlKernel, EveryMatchPositionAndMiss) {
                     auto expected = position == size ? -1 : static_cast<ptrdiff_t>(position);
                     EXPECT_EQ(expected, before_search(data.data() + offset, size, 1, mode));
                     EXPECT_EQ(expected, after_search(data.data() + offset, size, 1, mode));
+                    EXPECT_EQ(expected, candidate_search(data.data() + offset, size, 1, mode));
                 }
                 if (position != size) data[offset + position] = 'x';
             }

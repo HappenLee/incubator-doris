@@ -28,7 +28,8 @@ HEAD = "a2a4709571873e475699d69787b0da8a486ae6a7"
 out = Path("arm70747-generated")
 out.mkdir(exist_ok=True)
 manifest = {}
-for variant, revision in (("before", BASE), ("after", HEAD)):
+CANDIDATE = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+for variant, revision in (("before", BASE), ("after", HEAD), ("candidate", CANDIDATE)):
     def source(path):
         text = subprocess.check_output(["git", "show", f"{revision}:{path}"], text=True)
         manifest[f"{variant}:{path}"] = {

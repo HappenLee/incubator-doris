@@ -32,3 +32,6 @@ size_t before_count(const FilterView& filter);
 size_t after_count(const FilterView& filter);
 ptrdiff_t before_search(const char* data, size_t size, int symbols, int mode);
 ptrdiff_t after_search(const char* data, size_t size, int symbols, int mode);
+
+size_t candidate_count(const FilterView& filt);
+ptrdiff_t candidate_search(const char* data, size_t size, int symbols, int mode);

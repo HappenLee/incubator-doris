@@ -21,11 +21,8 @@
 
 #include "after_url.h"
 #include "before_url.h"
-#include "control_url.h"
+#include "candidate_url.h"
 
-#if !defined(__aarch64__)
-#error This diagnostic is intended for native AArch64
-#endif
 
 #define DEFINE_VERSION(Name, scope)                                          \
     struct Name {                                                            \
@@ -40,7 +37,7 @@
     }
 DEFINE_VERSION(Before, before_url);
 DEFINE_VERSION(After, after_url);
-DEFINE_VERSION(Control, control_url);
+DEFINE_VERSION(Candidate, candidate_url);
 #undef DEFINE_VERSION
 
 template <class Version, bool Reverse>
@@ -53,7 +50,7 @@ void BM_Search(benchmark::State& state) {
     const size_t size = state.range(0);
     const int match = state.range(1);
     std::string data(size + 1, 'x');
-    const size_t position = match == 1 ? 0 : match == 2 ? size - 1 : size - 4;
+    const size_t position = match == 1 ? 0 : match == 2 ? size - 1 : match == 4 ? 3 : match == 5 ? 4 : match == 6 ? size - 5 : size - 4;
     if (match != 0) data[position + 1] = '.';
     const char* begin = data.data() + 1;
     const char* end = begin + size;
@@ -79,7 +76,7 @@ void BM_Search(benchmark::State& state) {
 #define REGISTER_SEARCH(version, label, reverse, direction, inline_call, call_label) \
     BENCHMARK_TEMPLATE(BM_Search, version, reverse, inline_call)                     \
             ->Name(call_label "/" label "/" direction)                               \
-            ->ArgsProduct({{64, 256}, {0, 1, 2, 3}})
+            ->ArgsProduct({{8, 16, 64, 256}, {0, 1, 2, 3, 4, 5, 6}})
 #define REGISTER_VERSION(version, label)                                \
     REGISTER_SEARCH(version, label, false, "forward", false, "Direct"); \
     REGISTER_SEARCH(version, label, true, "reverse", false, "Direct");  \
@@ -87,7 +84,7 @@ void BM_Search(benchmark::State& state) {
     REGISTER_SEARCH(version, label, true, "reverse", true, "Inline")
 REGISTER_VERSION(Before, "before");
 REGISTER_VERSION(After, "after");
-REGISTER_VERSION(Control, "control");
+REGISTER_VERSION(Candidate, "candidate");
 #undef REGISTER_VERSION
 #undef REGISTER_SEARCH
 
