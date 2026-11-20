@@ -26,6 +26,10 @@
 #include <stdexcept>
 #include <string>
 
+#if defined(__aarch64__)
+#include "util/simd/bits.h"
+#endif
+
 #if defined(__SSE2__) || defined(__aarch64__)
 #include "util/sse_util.hpp"
 #endif
@@ -169,15 +173,8 @@ inline const char* find_first_symbols_sse2(const char* const begin, const char* 
         if (maybe_negate<positive>(is_in<symbols...>(*pos))) {
             return pos;
         }
-        if (end - pos >= 16) {
-            // Probe nearby delimiters without shifting the subsequent full vector blocks.
-            for (int i = 1; i < 4; ++i) {
-                if (maybe_negate<positive>(is_in<symbols...>(pos[i]))) {
-                    return pos + i;
-                }
-            }
-        } else {
-            // The scalar tail need not check the first byte again.
+        // Keep full vector blocks aligned with begin; skip the checked byte only in the tail.
+        if (end - pos < 16) {
             ++pos;
         }
     }
@@ -189,8 +186,19 @@ inline const char* find_first_symbols_sse2(const char* const begin, const char* 
 
         __m128i eq = mm_is_in<symbols...>(bytes);
 
+#if defined(__aarch64__)
+        auto bit_mask = doris::simd::get_nibble_mask(vreinterpretq_u8_s64(eq));
+        if constexpr (!positive) {
+            bit_mask = ~bit_mask;
+        }
+        // Each matching byte occupies four bits, so convert the bit index to a byte index.
+        if (bit_mask) {
+            return pos + (__builtin_ctzll(bit_mask) >> 2);
+        }
+#else
         uint16_t bit_mask = maybe_negate<positive>(uint16_t(_mm_movemask_epi8(eq)));
         if (bit_mask) return pos + __builtin_ctz(bit_mask);
+#endif
     }
 #endif
 
@@ -233,16 +241,8 @@ inline const char* find_last_symbols_sse2(const char* const begin, const char* c
         if (maybe_negate<positive>(is_in<symbols...>(pos[-1]))) {
             return pos - 1;
         }
-        if (pos - begin >= 16) {
-            // A suffix such as ".com" needs only four scalar comparisons to find its dot.
-            // Keep the vector end unchanged so a miss still uses full 16-byte blocks.
-            for (int i = 2; i <= 4; ++i) {
-                if (maybe_negate<positive>(is_in<symbols...>(pos[-i]))) {
-                    return pos - i;
-                }
-            }
-        } else {
-            // The scalar tail need not check the last byte again.
+        // Keep full vector blocks aligned with end; skip the checked byte only in the tail.
+        if (pos - begin < 16) {
             --pos;
         }
     }
@@ -254,11 +254,22 @@ inline const char* find_last_symbols_sse2(const char* const begin, const char* c
 
         __m128i eq = mm_is_in<symbols...>(bytes);
 
+#if defined(__aarch64__)
+        auto bit_mask = doris::simd::get_nibble_mask(vreinterpretq_u8_s64(eq));
+        if constexpr (!positive) {
+            bit_mask = ~bit_mask;
+        }
+        // Four mask bits per byte also let clz locate a suffix such as the dot in ".com".
+        if (bit_mask) {
+            return pos - 1 - (__builtin_clzll(bit_mask) >> 2);
+        }
+#else
         uint16_t bit_mask = maybe_negate<positive>(uint16_t(_mm_movemask_epi8(eq)));
         if (bit_mask)
             return pos - 1 -
                    (__builtin_clz(bit_mask) -
                     16); /// because __builtin_clz works with mask as uint32.
+#endif
     }
 #endif
 
