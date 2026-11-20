@@ -163,6 +163,16 @@ template <bool positive, ReturnMode return_mode, char... symbols>
 inline const char* find_first_symbols_sse2(const char* const begin, const char* const end) {
     const char* pos = begin;
 
+#if defined(__aarch64__)
+    // Avoid NEON mask extraction when a delimiter occurs in the first few bytes.
+    // Keep the vector start unchanged so a miss still uses full 16-byte blocks.
+    if (end - pos >= 16) {
+        for (int i = 0; i < 4; ++i) {
+            if (maybe_negate<positive>(is_in<symbols...>(pos[i]))) return pos + i;
+        }
+    }
+#endif
+
 #if defined(__SSE2__) || defined(__aarch64__)
     for (; end - pos >= 16; pos += 16) {
         __m128i bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(pos));
@@ -206,6 +216,16 @@ inline const char* find_first_symbols_sse2(const char* const begin, const char* 
 template <bool positive, ReturnMode return_mode, char... symbols>
 inline const char* find_last_symbols_sse2(const char* const begin, const char* const end) {
     const char* pos = end;
+
+#if defined(__aarch64__)
+    // A suffix such as ".com" needs only four scalar comparisons to find its dot.
+    // Keep the vector end unchanged so a miss still uses full 16-byte blocks.
+    if (pos - begin >= 16) {
+        for (int i = 1; i <= 4; ++i) {
+            if (maybe_negate<positive>(is_in<symbols...>(pos[-i]))) return pos - i;
+        }
+    }
+#endif
 
 #if defined(__SSE2__) || defined(__aarch64__)
     for (; pos - begin >= 16; pos -= 16) {
