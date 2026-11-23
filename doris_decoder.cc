@@ -2,12 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <climits>
-#include <cstring>
-#include <iostream>
-#include <tuple>
-#include <type_traits>
-#include <utility>
 
 #include "arm_unpack.h"
 
@@ -21,32 +15,9 @@
 #define doris_bulk doris_bulk_neon
 #endif
 
-#define DCHECK(...) if (true) {} else std::cerr
-#define DCHECK_GE(...) DCHECK()
-#define DCHECK_LE(...) DCHECK()
-#define LIKELY(x) __builtin_expect(!!(x), true)
-#define UNLIKELY(x) __builtin_expect(!!(x), false)
-#define NO_SANITIZE_UNDEFINED __attribute__((__no_sanitize__("undefined")))
-#define RETURN_IF_ERROR(...)                   \
-    do {                                       \
-        const auto status = (__VA_ARGS__);      \
-        if (!status.ok()) return status;       \
-    } while (false)
+#include "doris_harness.h"
 
-#include "util/bit_packing.inline.h"
-
-namespace doris {
-#include "doris_reader.inc"
-#include "doris_reader_inline.inc"
-
-namespace format::parquet::native {
-
-struct Status {
-    bool success;
-    bool ok() const { return success; }
-    static Status OK() { return {true}; }
-    static Status IOError(const char*) { return {false}; }
-};
+namespace doris::format::parquet::native {
 
 class ParquetFixedValueConsumer {
 public:
@@ -82,8 +53,7 @@ private:
     uint8_t* out_;
 };
 
-} // namespace format::parquet::native
-} // namespace doris
+} // namespace doris::format::parquet::native
 
 void doris_native(const uint8_t* in, uint8_t* out, int rows, int block) {
     using namespace doris::format::parquet::native;

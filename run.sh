@@ -31,7 +31,8 @@ for compiler in "$@"; do
         "$compiler" "${flags[@]}" -DDORIS_ARM_VARIANT="$variant" \
             -c doris_decoder.cc -o "generated/doris_$variant.o"
     done
-    "$compiler" "${flags[@]}" generated/doris_[012].o velox_decoder.cc benchmark.cc \
+    "$compiler" "${flags[@]}" -DDORIS_ARM_VARIANT=0 generated/doris_[012].o \
+        doris_legacy.cc velox_decoder.cc benchmark.cc \
         -o generated/benchmark
     if [[ "$(uname -m)" == aarch64 ]]; then
         objdump -d generated/doris_1.o > "results/$compiler_name/starrocks-style.s"

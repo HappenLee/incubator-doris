@@ -4,6 +4,8 @@
 #include <cstdint>
 
 void doris_native(const uint8_t* in, uint8_t* out, int rows, int block);
+void prepare_doris_v1(int rows, int block);
+void doris_v1(const uint8_t* in, uint8_t* out, int rows, int block);
 void doris_bulk(const uint8_t* in, uint8_t* out, int rows, int block);
 void doris_native_sr(const uint8_t* in, uint8_t* out, int rows, int block);
 void doris_bulk_sr(const uint8_t* in, uint8_t* out, int rows, int block);

@@ -31,6 +31,7 @@ struct Implementation {
 };
 
 const std::array implementations = {
+        Implementation {"Doris_native_V1", doris_v1},
         Implementation {"Doris_native", doris_native},
         Implementation {"Doris_native_SR_style", doris_native_sr},
         Implementation {"Doris_native_NEON", doris_native_neon},
@@ -64,6 +65,7 @@ struct Input {
 void verify_decoders() {
     for (int rows : {1, 3, 7, 8, 9, 31, 32, 33, 127, 128, 129, 257, 4097}) {
         for (int block : {1, 3, 7, 8, 31, 32, 127, 128, 136, 4096}) {
+            prepare_doris_v1(rows, block);
             for (const auto& impl : implementations) {
                 if (impl.byte_aligned_only && block % 8 != 0) continue;
                 Input data(rows, rows + block);
@@ -72,6 +74,7 @@ void verify_decoders() {
             }
         }
     }
+    prepare_doris_v1(2048, 128);
     for (int input_offset : {0, 1, 2, 3}) {
         Input data(2048, 971);
         std::vector<uint8_t> packed(data.packed.size() + input_offset);
@@ -110,6 +113,7 @@ int calibrate(Decode decode, Input& data, int rows, int block) {
 
 void benchmark(int rows, int block) {
     constexpr int rounds = 11;
+    prepare_doris_v1(rows, block);
     Input data(rows, 731);
     std::array<std::vector<double>, implementations.size()> samples;
     std::array<int, implementations.size()> iterations;

@@ -21,3 +21,8 @@ uses NEON byte lookup, masking, and unsigned minimum to expand 32 values
 from a 4-byte load. Each candidate is built alongside the baseline in its own
 translation unit and namespace. It runs both inside the unchanged Doris
 decoder and as a bulk primitive.
+
+Native V1 uses the unchanged legacy PLAIN decoder and run iteration from the
+last upstream commit before legacy scanner removal. Its output column models
+already-reserved UInt8 storage. The no-null run metadata is prepared outside
+timing.
