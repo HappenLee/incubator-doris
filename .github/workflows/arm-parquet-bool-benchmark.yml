@@ -1,0 +1,42 @@
+name: ARM64 Parquet BOOLEAN decoder benchmark
+
+on:
+  push:
+    branches: [ci/arm-parquet-bool-benchmark]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Boost preprocessor headers if needed
+        run: |
+          if [[ ! -f /usr/include/boost/preprocessor/repetition/repeat_from_to.hpp ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y libboost-dev
+          fi
+      - name: Compare native ARM64 decoders
+        run: |
+          if command -v clang++-20 >/dev/null; then
+            clang_compiler=clang++-20
+          else
+            clang_compiler=clang++
+          fi
+          if command -v g++-14 >/dev/null; then
+            gcc_compiler=g++-14
+          else
+            gcc_compiler=g++
+          fi
+          bash run.sh "$clang_compiler" "$gcc_compiler"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arm64-parquet-boolean
+          path: results/
