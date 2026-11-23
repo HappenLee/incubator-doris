@@ -43,8 +43,25 @@ def velox(file):
     return fetch("facebookincubator/velox", VELOX, file)
 
 
-for path in ("util/bit_packing.h", "util/bit_packing.inline.h"):
-    put(path, doris(path))
+put("util/bit_packing.h", doris("util/bit_packing.h"))
+unpack_point = "    // Call UnpackValue for 0 <= i < 32.\n"
+packing_inline = doris("util/bit_packing.inline.h")
+assert packing_inline.count(unpack_point) == 1
+put("util/bit_packing.inline.h", packing_inline.replace(unpack_point, """\
+#if DORIS_ARM_VARIANT && defined(__aarch64__) && defined(__ARM_NEON)
+    if constexpr (BIT_WIDTH == 1 && std::is_same_v<OutType, uint8_t>) {
+#if DORIS_ARM_VARIANT == 1
+        arm_bool::unpack_starrocks_style(in, out);
+#elif DORIS_ARM_VARIANT == 2
+        arm_bool::unpack_neon(in, out);
+#else
+#error Unsupported benchmark variant
+#endif
+        return in + BYTES_TO_READ;
+    }
+#endif
+
+""" + unpack_point))
 bit_util = doris("util/bit_util.h")
 bit_methods = [
     between(bit_util, "    static inline int64_t round_up(", "\n    }") + "\n    }\n",

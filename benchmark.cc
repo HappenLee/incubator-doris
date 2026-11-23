@@ -27,12 +27,17 @@ void require(bool condition) {
 struct Implementation {
     const char* name;
     Decode decode;
+    bool byte_aligned_only = false;
 };
 
 const std::array implementations = {
         Implementation {"Doris_native", doris_native},
+        Implementation {"Doris_native_SR_style", doris_native_sr},
+        Implementation {"Doris_native_NEON", doris_native_neon},
         Implementation {"Velox_dense", velox_dense},
-        Implementation {"Doris_bulk_primitive", doris_bulk},
+        Implementation {"Doris_bulk_primitive", doris_bulk, true},
+        Implementation {"Doris_bulk_SR_style", doris_bulk_sr, true},
+        Implementation {"Doris_bulk_NEON", doris_bulk_neon, true},
 };
 
 struct Input {
@@ -60,11 +65,25 @@ void verify_decoders() {
     for (int rows : {1, 3, 7, 8, 9, 31, 32, 33, 127, 128, 129, 257, 4097}) {
         for (int block : {1, 3, 7, 8, 31, 32, 127, 128, 136, 4096}) {
             for (const auto& impl : implementations) {
-                if (impl.decode == doris_bulk && block % 8 != 0) continue;
+                if (impl.byte_aligned_only && block % 8 != 0) continue;
                 Input data(rows, rows + block);
                 impl.decode(data.packed.data(), data.output.data(), rows, block);
                 data.check();
             }
+        }
+    }
+    for (int input_offset : {0, 1, 2, 3}) {
+        Input data(2048, 971);
+        std::vector<uint8_t> packed(data.packed.size() + input_offset);
+        for (size_t byte = 0; byte < data.packed.size(); ++byte) {
+            packed[input_offset + byte] = static_cast<uint8_t>(byte);
+            for (int bit = 0; bit < 8; ++bit) {
+                data.expected[byte * 8 + bit] = (byte >> bit) & 1;
+            }
+        }
+        for (const auto& impl : implementations) {
+            impl.decode(packed.data() + input_offset, data.output.data(), 2048, 128);
+            data.check();
         }
     }
 }
@@ -97,7 +116,8 @@ void benchmark(int rows, int block) {
     for (size_t i = 0; i < implementations.size(); ++i) {
         iterations[i] = calibrate(implementations[i].decode, data, rows, block);
     }
-    std::array<size_t, implementations.size()> order {0, 1, 2};
+    std::array<size_t, implementations.size()> order;
+    std::iota(order.begin(), order.end(), 0);
     std::mt19937 schedule(rows + block);
     for (int repeat = 0; repeat < rounds; ++repeat) {
         std::shuffle(order.begin(), order.end(), schedule);
@@ -120,7 +140,7 @@ void benchmark(int rows, int block) {
 
 int main() {
     verify_decoders();
-    std::puts("Verified values, canaries, and split batches across byte and scratch boundaries.");
+    std::puts("Verified all byte patterns, unaligned inputs, canaries, and split batches.");
     std::puts("result,values,block,implementation,median_ns,p20_ns,p80_ns,Gvalues/s,checksum");
     benchmark(128, 128);
     benchmark(4096, 4096);

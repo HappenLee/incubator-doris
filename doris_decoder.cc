@@ -9,6 +9,18 @@
 #include <type_traits>
 #include <utility>
 
+#include "arm_unpack.h"
+
+#if DORIS_ARM_VARIANT == 1
+#define doris doris_sr_variant
+#define doris_native doris_native_sr
+#define doris_bulk doris_bulk_sr
+#elif DORIS_ARM_VARIANT == 2
+#define doris doris_neon_variant
+#define doris_native doris_native_neon
+#define doris_bulk doris_bulk_neon
+#endif
+
 #define DCHECK(...) if (true) {} else std::cerr
 #define DCHECK_GE(...) DCHECK()
 #define DCHECK_LE(...) DCHECK()
@@ -73,18 +85,14 @@ private:
 } // namespace format::parquet::native
 } // namespace doris
 
-void verify_doris_boundary(const uint8_t* in, size_t bytes, uint8_t* out, int rows, int block) {
+void doris_native(const uint8_t* in, uint8_t* out, int rows, int block) {
     using namespace doris::format::parquet::native;
-    BoolPlainDecoder reader(in, bytes);
+    BoolPlainDecoder reader(in, (rows + 7) / 8);
     ByteConsumer consumer(out);
     for (int decoded = 0; decoded < rows; decoded += block) {
         const int count = std::min(block, rows - decoded);
         require(reader.decode_fixed_values(count, consumer).ok());
     }
-}
-
-void doris_native(const uint8_t* in, uint8_t* out, int rows, int block) {
-    verify_doris_boundary(in, (rows + 7) / 8, out, rows, block);
 }
 
 void doris_bulk(const uint8_t* in, uint8_t* out, int rows, int block) {

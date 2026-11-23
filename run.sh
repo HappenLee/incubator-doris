@@ -27,7 +27,17 @@ for compiler in "$@"; do
     fi
     "$compiler" "${flags[@]}" -dM -E -x c++ /dev/null > "results/$compiler_name/macros.txt"
     ! grep -Eq '^#define (__BMI2__|__AVX2__) ' "results/$compiler_name/macros.txt"
-    "$compiler" "${flags[@]}" doris_decoder.cc velox_decoder.cc benchmark.cc -o generated/benchmark
+    for variant in 0 1 2; do
+        "$compiler" "${flags[@]}" -DDORIS_ARM_VARIANT="$variant" \
+            -c doris_decoder.cc -o "generated/doris_$variant.o"
+    done
+    "$compiler" "${flags[@]}" generated/doris_[012].o velox_decoder.cc benchmark.cc \
+        -o generated/benchmark
+    if [[ "$(uname -m)" == aarch64 ]]; then
+        objdump -d generated/doris_1.o > "results/$compiler_name/starrocks-style.s"
+        objdump -d generated/doris_2.o > "results/$compiler_name/neon.s"
+        grep -Eq '[[:space:]]tbl[[:space:]]' "results/$compiler_name/neon.s"
+    fi
     taskset -c "$cpu" generated/benchmark | tee "results/$compiler_name/run.csv"
     awk '/^(result|Verified)/' "results/$compiler_name/run.csv"
 done

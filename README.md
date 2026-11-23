@@ -13,3 +13,11 @@ I/O, decompression, or validation. It checks every output byte, leftover
 bits across read calls, and output canaries. Cases use 11 interleaved rounds
 with a calibrated number of iterations. The CSV files contain every round
 and the summary medians.
+
+Two candidate implementations replace only the 32-value kernel for
+`uint8_t, bit width 1` on ARM64. The first uses scalar shift-and-mask with a
+NEON store in 8-value groups, following the StarRocks approach. The second
+uses NEON byte lookup, masking, and unsigned minimum to expand 32 values
+from a 4-byte load. Each candidate is built alongside the baseline in its own
+translation unit and namespace. It runs both inside the unchanged Doris
+decoder and as a bulk primitive.
