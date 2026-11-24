@@ -2,7 +2,9 @@
 
 from pathlib import Path
 import hashlib
+import subprocess
 import sys
+import tempfile
 from urllib.request import urlopen
 
 DORIS = "2ed7dc60c5bc327cd744999409cf9ea779ccba60"
@@ -43,10 +45,27 @@ def doris(file, commit=DORIS):
 def velox(file):
     return fetch("facebookincubator/velox", VELOX, file)
 
+candidate = {}
+if len(sys.argv) > 2:
+    patch = Path(sys.argv[2]).resolve()
+    with tempfile.TemporaryDirectory() as directory:
+        checkout = Path(directory)
+        paths = [
+            ("util/bit_packing.inline.h", DORIS),
+            ("format/parquet/bool_plain_decoder.cpp", DORIS_LEGACY),
+            ("format_v2/parquet/reader/native/bool_plain_decoder.cpp", DORIS),
+        ]
+        for file, commit in paths:
+            output = checkout / "be/src" / file
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(doris(file, commit))
+        subprocess.run(["git", "apply", str(patch)], cwd=checkout, check=True)
+        candidate = {file: (checkout / "be/src" / file).read_text() for file, _ in paths}
+
 
 put("util/bit_packing.h", doris("util/bit_packing.h"))
 unpack_point = "    // Call UnpackValue for 0 <= i < 32.\n"
-packing_inline = doris("util/bit_packing.inline.h")
+packing_inline = candidate.get("util/bit_packing.inline.h") or doris("util/bit_packing.inline.h")
 assert packing_inline.count(unpack_point) == 1
 put("util/bit_packing.inline.h", packing_inline.replace(unpack_point, """\
 #if DORIS_ARM_VARIANT && defined(__aarch64__) && defined(__ARM_NEON)
@@ -85,7 +104,7 @@ put("doris_reader_inline.inc", between(
 decoder = "format_v2/parquet/reader/native/bool_plain_decoder"
 doris_header = doris(decoder + ".h")
 put("doris_decoder.inc", between(doris_header, "protected:\n", "    std::vector<uint8_t> selected_values_"))
-doris_cpp = doris(decoder + ".cpp")
+doris_cpp = candidate.get(decoder + ".cpp") or doris(decoder + ".cpp")
 put("doris_decoder_body.inc", between(
     doris_cpp, "Status BoolPlainDecoder::decode_fixed_values(",
     "\nStatus BoolPlainDecoder::decode_selected_fixed_values("))
@@ -93,7 +112,7 @@ put("doris_decoder_body.inc", between(
 legacy = "format/parquet/bool_plain_decoder"
 legacy_header = doris(legacy + ".h", DORIS_LEGACY)
 put("doris_legacy_decoder.inc", between(legacy_header, "protected:\n", "\n};"))
-legacy_cpp = doris(legacy + ".cpp", DORIS_LEGACY)
+legacy_cpp = candidate.get(legacy + ".cpp") or doris(legacy + ".cpp", DORIS_LEGACY)
 put("doris_legacy_body.inc", between(
     legacy_cpp, "Status BoolPlainDecoder::decode_values(", "\n} // namespace doris"))
 parquet_common = doris("format/parquet/parquet_common.h", DORIS_LEGACY)

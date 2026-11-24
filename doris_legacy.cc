@@ -21,6 +21,7 @@ class ColumnUInt8 {
 public:
     ColumnUInt8(uint8_t* data, size_t capacity) : data_(data), capacity_(capacity) {}
     ColumnUInt8& get_data() { return *this; }
+    UInt8* data() { return data_; }
     size_t size() const { return size_; }
     void resize(size_t size) {
         if (size > capacity_) std::abort();
@@ -42,6 +43,11 @@ struct MutableColumnPtr {
 template <typename T, typename From>
 T assert_cast(From* ptr) {
     return static_cast<T>(ptr);
+}
+
+template <typename T, typename From>
+T cast_set(From value) {
+    return static_cast<T>(value);
 }
 
 #include "doris_legacy_select.inc"

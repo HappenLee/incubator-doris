@@ -1,0 +1,117 @@
+diff --git a/be/src/format/parquet/bool_plain_decoder.cpp b/be/src/format/parquet/bool_plain_decoder.cpp
+index 254fd3b2fef..26ada91e0f0 100644
+--- a/be/src/format/parquet/bool_plain_decoder.cpp
++++ b/be/src/format/parquet/bool_plain_decoder.cpp
+@@ -20,6 +20,7 @@
+ #include <glog/logging.h>
+ 
+ #include <algorithm>
++#include <cstring>
+ 
+ #include "core/column/column_vector.h"
+ #include "core/types.h"
+@@ -72,6 +73,36 @@ Status BoolPlainDecoder::_decode_values(MutableColumnPtr& doris_column, DataType
+     while (size_t run_length = select_vector.get_next_run<has_filter>(&read_type)) {
+         switch (read_type) {
+         case ColumnSelectVector::CONTENT: {
++#if !defined(__AVX2__)
++            constexpr size_t batch_size = 32;
++            if (run_length >= batch_size) {
++                const size_t cached = std::min(
++                        run_length, static_cast<size_t>(num_unpacked_values_ - unpacked_value_idx_));
++                auto* output = column_data.data() + data_index;
++                std::memcpy(output, unpacked_values_ + unpacked_value_idx_, cached);
++                unpacked_value_idx_ += cached;
++
++                const size_t remaining = run_length - cached;
++                const int full_batch = cast_set<int>(remaining / batch_size * batch_size);
++                if (full_batch != 0 &&
++                    bool_values_.UnpackBatch(1, full_batch, output + cached) != full_batch) {
++                    return Status::IOError("Can't read enough booleans in plain decoder");
++                }
++                // Retain the unconsumed values so the next run starts at the right bit.
++                const size_t tail = remaining - full_batch;
++                if (tail != 0) {
++                    num_unpacked_values_ =
++                            bool_values_.UnpackBatch(1, UNPACKED_BUFFER_LEN, unpacked_values_);
++                    if (UNLIKELY(num_unpacked_values_ < tail)) {
++                        return Status::IOError("Can't read enough booleans in plain decoder");
++                    }
++                    std::memcpy(output + cached + full_batch, unpacked_values_, tail);
++                    unpacked_value_idx_ = tail;
++                }
++                data_index += run_length;
++                break;
++            }
++#endif
+             bool value;
+             for (size_t i = 0; i < run_length; ++i) {
+                 if (UNLIKELY(!_decode_value(&value))) {
+diff --git a/be/src/format_v2/parquet/reader/native/bool_plain_decoder.cpp b/be/src/format_v2/parquet/reader/native/bool_plain_decoder.cpp
+index 06e4b239f3a..2043c0d37ff 100644
+--- a/be/src/format_v2/parquet/reader/native/bool_plain_decoder.cpp
++++ b/be/src/format_v2/parquet/reader/native/bool_plain_decoder.cpp
+@@ -29,6 +29,7 @@
+ namespace doris::format::parquet::native {
+ Status BoolPlainDecoder::decode_fixed_values(size_t num_values,
+                                              ParquetFixedValueConsumer& consumer) {
++#if defined(__AVX2__)
+     std::array<uint8_t, UNPACKED_BUFFER_LEN> values;
+     size_t decoded = 0;
+     while (decoded < num_values) {
+@@ -43,6 +44,26 @@ Status BoolPlainDecoder::decode_fixed_values(size_t num_values,
+         RETURN_IF_ERROR(consumer.consume(values.data(), batch_size, sizeof(uint8_t)));
+         decoded += batch_size;
+     }
++#else
++    const size_t available = num_unpacked_values_ - unpacked_value_idx_ +
++                             static_cast<size_t>(bool_values_.bytes_left()) * 8;
++    if (UNLIKELY(num_values > available)) {
++        return Status::IOError("Can't read enough booleans in plain decoder");
++    }
++    while (num_values != 0) {
++        if (unpacked_value_idx_ == num_unpacked_values_) {
++            num_unpacked_values_ =
++                    bool_values_.UnpackBatch(1, UNPACKED_BUFFER_LEN, unpacked_values_);
++            unpacked_value_idx_ = 0;
++        }
++        const auto* values = unpacked_values_ + unpacked_value_idx_;
++        const size_t batch_size = std::min(
++                num_values, static_cast<size_t>(num_unpacked_values_ - unpacked_value_idx_));
++        unpacked_value_idx_ += batch_size;
++        RETURN_IF_ERROR(consumer.consume(values, batch_size, sizeof(uint8_t)));
++        num_values -= batch_size;
++    }
++#endif
+     return Status::OK();
+ }
+ 
+diff --git a/be/src/util/bit_packing.inline.h b/be/src/util/bit_packing.inline.h
+index d0de57a836b..9dff18bf8fb 100644
+--- a/be/src/util/bit_packing.inline.h
++++ b/be/src/util/bit_packing.inline.h
+@@ -260,6 +260,24 @@ const uint8_t* BitPacking::Unpack32Values(const uint8_t* __restrict__ in, int64_
+     constexpr int BYTES_TO_READ = BitUtil::RoundUpNumBytes(32 * BIT_WIDTH);
+     DCHECK_GE(in_bytes, BYTES_TO_READ);
+ 
++#if !defined(__AVX2__)
++    if constexpr (BIT_WIDTH == 1 && std::is_same_v<OutType, uint8_t>) {
++        for (int byte = 0; byte < BYTES_TO_READ; ++byte) {
++            const uint8_t packed = in[byte];
++            auto* values = out + byte * CHAR_BIT;
++            values[0] = packed & 1;
++            values[1] = (packed >> 1) & 1;
++            values[2] = (packed >> 2) & 1;
++            values[3] = (packed >> 3) & 1;
++            values[4] = (packed >> 4) & 1;
++            values[5] = (packed >> 5) & 1;
++            values[6] = (packed >> 6) & 1;
++            values[7] = packed >> 7;
++        }
++        return in + BYTES_TO_READ;
++    }
++#endif
++
+     // Call UnpackValue for 0 <= i < 32.
+ #pragma push_macro("UNPACK_VALUE_CALL")
+ #define UNPACK_VALUE_CALL(ignore1, i, ignore2) \

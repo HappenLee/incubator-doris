@@ -41,4 +41,15 @@ for compiler in "$@"; do
     fi
     taskset -c "$cpu" generated/benchmark | tee "results/$compiler_name/run.csv"
     awk '/^(result|Verified)/' "results/$compiler_name/run.csv"
+
+    python3 prepare.py generated candidate.patch > "results/$compiler_name/candidate-sources.txt"
+    for variant in 0 1 2; do
+        "$compiler" "${flags[@]}" -DDORIS_ARM_VARIANT="$variant" \
+            -c doris_decoder.cc -o "generated/candidate_$variant.o"
+    done
+    "$compiler" "${flags[@]}" -DDORIS_ARM_VARIANT=0 generated/candidate_[012].o \
+        doris_legacy.cc velox_decoder.cc benchmark.cc -o generated/benchmark-candidate
+    taskset -c "$cpu" generated/benchmark-candidate | tee "results/$compiler_name/candidate.csv"
+    awk '/^(result|Verified)/' "results/$compiler_name/candidate.csv"
+    python3 prepare.py generated > /dev/null
 done
