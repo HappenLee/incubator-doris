@@ -1,5 +1,5 @@
 diff --git a/be/src/format/parquet/bool_plain_decoder.cpp b/be/src/format/parquet/bool_plain_decoder.cpp
-index 254fd3b2fef..26ada91e0f0 100644
+index 254fd3b2fef..4de53ce7627 100644
 --- a/be/src/format/parquet/bool_plain_decoder.cpp
 +++ b/be/src/format/parquet/bool_plain_decoder.cpp
 @@ -20,6 +20,7 @@
@@ -10,15 +10,16 @@ index 254fd3b2fef..26ada91e0f0 100644
  
  #include "core/column/column_vector.h"
  #include "core/types.h"
-@@ -72,6 +73,36 @@ Status BoolPlainDecoder::_decode_values(MutableColumnPtr& doris_column, DataType
+@@ -72,6 +73,37 @@ Status BoolPlainDecoder::_decode_values(MutableColumnPtr& doris_column, DataType
      while (size_t run_length = select_vector.get_next_run<has_filter>(&read_type)) {
          switch (read_type) {
          case ColumnSelectVector::CONTENT: {
 +#if !defined(__AVX2__)
 +            constexpr size_t batch_size = 32;
 +            if (run_length >= batch_size) {
-+                const size_t cached = std::min(
-+                        run_length, static_cast<size_t>(num_unpacked_values_ - unpacked_value_idx_));
++                const size_t cached =
++                        std::min(run_length,
++                                 static_cast<size_t>(num_unpacked_values_ - unpacked_value_idx_));
 +                auto* output = column_data.data() + data_index;
 +                std::memcpy(output, unpacked_values_ + unpacked_value_idx_, cached);
 +                unpacked_value_idx_ += cached;
@@ -30,7 +31,7 @@ index 254fd3b2fef..26ada91e0f0 100644
 +                    return Status::IOError("Can't read enough booleans in plain decoder");
 +                }
 +                // Retain the unconsumed values so the next run starts at the right bit.
-+                const size_t tail = remaining - full_batch;
++                const auto tail = static_cast<int>(remaining - full_batch);
 +                if (tail != 0) {
 +                    num_unpacked_values_ =
 +                            bool_values_.UnpackBatch(1, UNPACKED_BUFFER_LEN, unpacked_values_);
